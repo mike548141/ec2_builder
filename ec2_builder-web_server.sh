@@ -1,0 +1,305 @@
+#!/usr/bin/env bash
+#
+# Author:			Mike Clements, Competitive Edge
+# Version:			0.6.6-20191109
+# File:				ec2_builder-web_server.sh
+# License:			Creative Commons
+# Language:			bash
+#
+# Pre-requisite:
+#  The script is dependent upon its IAM role (arn:aws:iam::954095588241:role/ec2-web.cakeit.nz) and the IAM user (arn:aws:iam::954095588241:user/ec2.web2.cakeit.nz) for permissions
+#
+# Description:
+#  Produces a cakeIT web server, developed on an Amazon Linux 2 AMI.
+#
+# References:
+#
+# Updates:
+#
+# Improvements to be made:
+# Action: Have Lets Encrypt store the certificates for vhosts (/etc/letsencrypt/live) on the EFS volume
+# Action: Place this script in Git or S3, Change launch script to hold basic parameters and then pul this script down & execute it. Then delete itself. Tie bbedit into git
+# Action: Configure a local DB, Aurora Serverless resume is too slow (~25s)
+# Action: Keep all temporal data with vhost e.g. php session and cache data. And configure PHP security features like chroot
+# Action: Import my confluence download and any other info into the wiki
+# Action: Add support to run both PHP 5 and 7
+#  - https://stackoverflow.com/questions/42696856/running-two-php-versions-on-the-same-server
+#  - https://stackoverflow.com/questions/45033511/how-to-select-php-version-5-and-7-per-virtualhost-in-apache-2-4-on-debian
+#
+# Action: Automate backups of web data (config, DB & files) at the same timestamp to allow easy recovery
+# Action: Move websites to web2
+#
+# Action: Run each vhost as its own user and owner of their files. Q-Username should be domain name or a cn like competitive_edge?
+# Action: Configure security apps for defense in depth, take ideas from my suse studio scripts
+# Action: Add testing to the build script to make sure everything is built and working properly e.g. did the DNS record create successfully
+# Action: Install Tomcat?
+#
+# Action: SES for mail relay? So don't need SMTP out from server
+# Action: Static web data on S3, use a shared bucket to keep admin easy. Ideal would be a bucket per customer for security.
+#
+# Action: Upgrade to load balancing the web serving work across 2 or more instances
+# Action: Upgrade to multi-AZ, or even multi-region for all components.
+# Action: Move to a multi-account structure using AWS Organisations. Use AWS CloudFormer to define all the resources in a template.
+#
+# Action: Get all S3 data into right storage tier. Files smaller than ?128KB? on S3IA or S3. Data larger than that in Deep Archive. Check inventory files.
+#
+# Question: Can I shrink the EBS volume, its 8 GB but using 2.3GB
+# Question: Launch instance has a mount EFS volume option, is this better than what I have scripted? Can't find option in launch template
+#
+# useradd competitive_edge --home-dir /mnt/efs/vhost/cakeit.nz
+# chown -R competitive_edge:apache /mnt/efs/vhost/cakeit.nz
+#
+
+#======================================
+# Define the arrays
+#--------------------------------------
+
+#======================================
+# Define the functions
+#--------------------------------------
+feedback () {
+  echo ''
+  if [ "$1" == "title" ]
+  then
+    echo '******************************************************************************************'
+    echo '*                                                                                        *'
+    echo "*      $2"
+    echo '*                                                                                        *'
+    echo '******************************************************************************************'
+  elif [ "$1" == "h1" ]
+  then
+    echo '=========================================================================================='
+    echo " $2"
+    echo '------------------------------------------------------------------------------------------'
+  elif [ "$1" == "h2" ]
+  then
+    echo '=========================================================================================='
+    echo "==> $2"
+  elif [ "$1" == "h3" ]
+  then
+    echo '------------------------------------------------------------------------------------------'
+    echo "--> $2"
+  else
+    echo "*** Error in the feedback function using parameters"
+    echo "*** P0: $0"
+    echo "*** P1: $1"
+    echo "*** P2: $2"
+  fi
+  echo ''
+}
+
+#======================================
+# Declare the constants
+#--------------------------------------
+feedback title 'Launch script started'
+
+tenancy='cakeIT'
+resource_environment='prod'
+service_group='web.cakeit.nz'
+app='ec2_builder-web_server.sh'
+
+env_parameters="/${tenancy}/${resource_environment}"
+app_parameters="/${tenancy}/${resource_environment}/${service_group}/${app}"
+# The initial AWS region setting using the instances placement so that we can connect to the AWS SSM parameter store
+aws_region=`ec2-metadata --availability-zone | cut -c 12-20`
+
+# Configuration parameters are held in AWS Systems Manager Parameter Store, retrieving these using the AWC CLI. Permissions are granted to do this using a IAM role assigned to the instance
+feedback h1 'Collecting info from AWS Systems Manager Parameter Store'
+# Default config for AWS CLI tools
+aws_region=`aws ssm get-parameter --name "${app_parameters}/awscli/aws_region" --query 'Parameter.Value' --output text --region ${aws_region}`
+aws_cli_output=`aws ssm get-parameter --name "${app_parameters}/awscli/aws_cli_output" --query 'Parameter.Value' --output text --region ${aws_region}`
+# AWS API key and secret attached to the IAM user for web.cakeit.nz
+aws_access_key_id=`aws ssm get-parameter --name "${app_parameters}/awscli/aws_access_key_id" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption`
+aws_secret_access_key=`aws ssm get-parameter --name "${app_parameters}/awscli/aws_secret_access_key" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption`
+# Cloudflare API secret
+cloudflare_zoneid=`aws ssm get-parameter --name "${env_parameters}/common/cloudflare/cakeit.nz/zone_id" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption`
+cloudflare_api_token=`aws ssm get-parameter --name "${env_parameters}/common/cloudflare/cakeit.nz/api_token" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption`
+# The AWS EFS volume and mount point used to hold virtual host config, content and logs that is shared between web hosts (aka instances)
+efs_volume=`aws ssm get-parameter --name "${app_parameters}/efs_volume" --query 'Parameter.Value' --output text --region ${aws_region}`
+vhost_root=`aws ssm get-parameter --name "${app_parameters}/vhost_root" --query 'Parameter.Value' --output text --region ${aws_region}`
+# The AWS S3 volume used to hold web content that is shared between web hosts, not currently used but is cheaper than EFS
+s3_bucket=`aws ssm get-parameter --name "${app_parameters}/s3_bucket" --query 'Parameter.Value' --output text --region ${aws_region}`
+# The contact email address for Lets Encrypt if a certificate problem comes up
+pki_email=`aws ssm get-parameter --name "${app_parameters}/pki_email" --query 'Parameter.Value' --output text --region ${aws_region}`
+# The AWS Elastic IP address used to web host web.cakeit.nz
+eip_allocation_id=`aws ssm get-parameter --name "${app_parameters}/eip_allocation_id" --query 'Parameter.Value' --output text --region ${aws_region}`
+# Gather instance specific information
+instance_id=`ec2-metadata --instance-id | cut -c 14-`
+
+#======================================
+# Declare the variables
+#--------------------------------------
+# Gather instance specific information
+public_ipv4=`ec2-metadata --public-ipv4 | cut -c 14-`
+
+#======================================
+# Lets get into it
+#--------------------------------------
+# Allocate the EIP to this instance
+feedback h1 'Allocate the EIP public IP address to this instance'
+aws ec2 associate-address --instance-id ${instance_id} --allocation-id ${eip_allocation_id} --region ${aws_region}
+# Disabled as its still showing the old IP address at this stage, not sure how long until ec2-metadata updates after the EIP is associated. Command now occurs just before Cloudflare is called
+#public_ipv4=`ec2-metadata --public-ipv4 | cut -c 14-`
+
+# Update the software stack
+feedback h1 'Update the software stack'
+yum update -y
+
+# Install the management agents
+feedback h1 'Install the management agents'
+feedback h2 'AWS Systems Manager is installed by default, nothing left to do'
+#amazon-linux-extras install -y ansible2 rust1
+#yum install -y chef puppet
+
+# Add access to Extra Packages for Enterprise Linux (EPEL) from the Fedora project
+feedback h1 'Add access to Extra Packages for Enterprise Linux (EPEL) from the Fedora project'
+amazon-linux-extras install -y epel
+
+# Install security apps, requires EPEL
+feedback h1 'Install host security apps'
+#yum install -y fail2ban firewalld rkhunter selinux-policy tripwire
+yum install -y rkhunter tripwire
+
+# Install AWS EFS helper and mount the EFS volume for vhost data
+feedback h1 'Install AWS EFS helper'
+yum install -y amazon-efs-utils
+feedback h2 'Mount the EFS volume for vhost data and set it to auto mount at boot'
+mkdir --parents /mnt/efs
+mount -t efs -o tls ${efs_volume}:/ /mnt/efs
+echo "# Mount AWS EFS volume ${efs_volume} for the web root data">> /etc/fstab
+echo "${efs_volume}:/ /mnt/efs efs tls,_netdev 0 0">> /etc/fstab
+# Create a directory for this instances log files on the EFS volume
+feedback h2 'Create a space for this instances log files on the EFS volume'
+mkdir --parents "${vhost_root}/_default_/logs/${instance_id}.cakeit.nz"
+
+# Install Fuse S3FS and mount the S3 bucket for web server data - https://github.com/s3fs-fuse/s3fs-fuse
+feedback h1 'Install Fuse S3FS and mount the S3 bucket for web server data'
+yum install -y s3fs-fuse
+feedback h2 'Configure FUSE'
+sed -i 's|^# user_allow_other$|user_allow_other|' /etc/fuse.conf
+feedback h2 'Configure AWS CLI, S3FS uses the same credential file'
+aws configure set aws_access_key_id ${aws_access_key_id}
+aws configure set aws_secret_access_key ${aws_secret_access_key}
+aws configure set region ${aws_region}
+aws configure set output ${aws_cli_output}
+feedback h2 'Mount the S3 bucket for static web data and set it to auto mount at boot'
+mkdir --parents /mnt/s3
+s3fs ${s3_bucket} /mnt/s3 -o allow_other -o use_path_request_style
+echo "# Mount AWS S3 bucket ${s3_bucket} for static web data">> /etc/fstab
+echo "s3fs#${s3_bucket} /mnt/s3 fuse _netdev,allow_other,use_path_request_style 0 0">> /etc/fstab
+
+# Install scripting languages
+# Go & Ruby
+feedback h1 'Install scripting languages'
+feedback h2 'Install Go & Ruby'
+yum install -y golang ruby
+# Python
+feedback h2 'Install Python 3.x, 2.x is already installed'
+yum install -y python3
+# PHP
+feedback h2 'Install PHP 7.3 and some additional PHP modules'
+amazon-linux-extras install -y php7.3
+yum install -y php-bcmath php-gd php-intl php-mbstring php-pecl-apcu php-pecl-imagick php-pecl-libsodium php-pecl-zip php-xml
+
+# Customise the PHP config
+# Create a PHP config for the _default_ vhost
+feedback h3 'Create a PHP-FPM config for the _default_ vhost specific to this instance and store it on EBS'
+cp "${vhost_root}/_default_/conf/instance-specific-php-fpm.conf" /etc/php-fpm.d/this-instance.conf
+sed -i "s|i-.*\.cakeit\.nz|${instance_id}.cakeit.nz|g" /etc/php-fpm.d/this-instance.conf
+# Include the vhost config on the EFS volume
+feedback h3 'Include the vhost config on the EFS volume'
+echo '; Include the vhosts stored on the EFS volume'> /etc/php-fpm.d/vhost.conf
+echo "include=${vhost_root}/vhosts-php-fpm.conf">> /etc/php-fpm.d/vhost.conf
+feedback h3 'Restart PHP-FPM to recognise the additional PHP modules and config'
+systemctl restart php-fpm
+
+# Install Ghost Script, a PostScript interpreter and renderer that is used by WordPress for PDFs
+feedback h1 'Install Ghost Script'
+yum install -y ghostscript
+
+# Install Git to support content versioning in MediaWiki
+feedback h1 'Install Git'
+yum install -y git
+
+# Install the MariaDB client for connecting to Aurora Serverless to manage the databases
+feedback h1 'Install the MariaDB client'
+yum install -y mariadb
+
+# Install MariaDB server to host databases as Aurora Serverless resume is too slow (~25s)
+feedback h1 'Install the MariaDB server'
+yum install -y mariadb-server
+feedback h2 'Start the database server and set it to auto start at boot'
+systemctl start mariadb
+systemctl enable mariadb
+
+# Install the web server - https://mozilla.github.io/server-side-tls/ssl-config-generator/
+feedback h1 'Install the web server'
+amazon-linux-extras install -y httpd_modules
+yum install -y httpd mod_ssl
+feedback h2 'Start the web server and set it to auto start at boot'
+systemctl start httpd
+systemctl enable httpd
+
+# Customise the web server config
+feedback h2 'Customise the web server config'
+# Install extra modules
+feedback h2 'Install additional Apache HTTPD modules'
+yum install -y https://dl-ssl.google.com/dl/linux/direct/mod-pagespeed-stable_current_x86_64.rpm
+# Replace the Apache HTTPD MPM module prefork with the module event for HTTP/2 compatibility and to improve server performance
+feedback h2 'Disable the prefork MPM module and enable the event MPM module'
+cp '/etc/httpd/conf.modules.d/00-mpm.conf' '/etc/httpd/conf.modules.d/00-mpm.conf.bak'
+sed -i 's|^LoadModule mpm_prefork_module modules/mod_mpm_prefork\.so$|#LoadModule mpm_prefork_module modules/mod_mpm_prefork.so|' /etc/httpd/conf.modules.d/00-mpm.conf
+sed -i 's|^#LoadModule mpm_event_module modules/mod_mpm_event\.so$|LoadModule mpm_event_module modules/mod_mpm_event.so|' /etc/httpd/conf.modules.d/00-mpm.conf
+# Disable the _default_ SSL config as it will be in the server specific config
+feedback h2 'Disable the _default_ SSL config'
+mv '/etc/httpd/conf.d/ssl.conf' '/etc/httpd/conf.d/ssl.conf.disable'
+# Disable the welcome page config
+feedback h2 'Disable the welcome page config'
+mv '/etc/httpd/conf.d/welcome.conf' '/etc/httpd/conf.d/welcome.conf.disable'
+# Create a config for the server on the EBS volume
+feedback h2 'Create a _default_ virtual host config specific to this instance and store it on EBS'
+cp "${vhost_root}/_default_/conf/instance-specific-httpd.conf" /etc/httpd/conf.d/this-instance.conf
+sed -i "s|i-.*\.cakeit\.nz|${instance_id}.cakeit.nz|g" /etc/httpd/conf.d/this-instance.conf
+# Include the vhost config on the EFS volume
+feedback h2 'Include the vhost config on the EFS volume'
+echo '# Publish the vhosts stored on the EFS volume'> /etc/httpd/conf.d/vhost.conf
+echo "Include ${vhost_root}/vhosts-httpd.conf">> /etc/httpd/conf.d/vhost.conf
+feedback h2 'Restart the web server'
+systemctl restart httpd
+
+# Create a DNS entry for the web host
+feedback h1 'Create DNS entry on Cloudflare'
+# Update the public IP address before creating the DNS record, ec2-metadata should have recognised the EIP association by now
+public_ipv4=`ec2-metadata --public-ipv4 | cut -c 14-`
+curl -X POST "https://api.cloudflare.com/client/v4/zones/${cloudflare_zoneid}/dns_records" \
+     -H "Authorization: Bearer ${cloudflare_api_token}" \
+     -H "Content-Type: application/json" \
+     --data '{"type":"A","name":"'"${instance_id}"'","content":"'"${public_ipv4}"'","ttl":1,"priority":10,"proxied":false}'
+feedback h2 'Sleeping for 10 seconds to allow that DNS change to replicate'
+sleep 10
+
+# Install Let's Encrypt CertBot, requires EPEL
+feedback h1 'Install Lets Encrypt CertBot'
+yum install -y certbot python2-certbot-apache
+
+# Create and install the certificates
+feedback h2 'Get Lets Encrypt certificates for this server'
+certbot certonly --domains "${instance_id}.cakeit.nz,web2.cakeit.nz" --apache --non-interactive --agree-tos --email "${pki_email}" --no-eff-email --cert-path "${vhost_root}/_default_/pki" --key-path "${vhost_root}/_default_/pki" --fullchain-path "${vhost_root}/_default_/pki" --chain-path "${vhost_root}/_default_/pki" --logs-dir "${vhost_root}/_default_/logs/letsencrypt" --redirect --must-staple --staple-ocsp --hsts --uir
+# Customise the config to include the new certificate
+feedback h2 'Add the certificates to the web server config'
+sed -i "s|^  SSLCertificateFile |  #SSLCertificateFile |g" /etc/httpd/conf.d/this-instance.conf
+sed -i "s|^  SSLCertificateKeyFile |  #SSLCertificateKeyFile |g" /etc/httpd/conf.d/this-instance.conf
+sed -i "s|^  #SSLCertificateFile /etc/letsencrypt/live|  SSLCertificateFile /etc/letsencrypt/live|" /etc/httpd/conf.d/this-instance.conf
+sed -i "s|^  #SSLCertificateKeyFile /etc/letsencrypt/live|  SSLCertificateKeyFile /etc/letsencrypt/live|" /etc/httpd/conf.d/this-instance.conf
+feedback h2 'Restart the web server'
+systemctl restart httpd
+# Add a job to cron to run certbot regularly for renewals and revocations
+feedback h2 'Add a job to cron to run certbot regularly'
+echo '#!/usr/bin/env bash'> /etc/cron.daily/certbot
+echo '# Run Lets Encrypt Certbot to revoke and/or renew certiicates'>> /etc/cron.daily/certbot
+echo 'certbot renew --no-self-upgrade'>> /etc/cron.daily/certbot
+chmod 0700 /etc/cron.daily/certbot
+systemctl restart crond
+
+# Thats all I wrote
+feedback title "Launch script finished - https://${instance_id}.cakeit.nz/wiki/"
