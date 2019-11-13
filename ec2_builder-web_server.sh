@@ -111,10 +111,10 @@ install_pkg () {
 feedback title 'Launch script started'
 
 # Define the keys constants to decide what we are building
-#tenancy='cakeIT'
-#resource_environment='prod'
-#service_group='web.cakeit.nz'
-#app='ec2_builder-web_server.sh'
+tenancy='cakeIT'
+resource_environment='prod'
+service_group='web.cakeit.nz'
+app='ec2_builder-web_server.sh'
 
 # Define the parameter store structure
 common_parameters="/${tenancy}/${resource_environment}/common"
