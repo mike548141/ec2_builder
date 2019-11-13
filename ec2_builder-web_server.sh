@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.6.11-20191113
+# Version:      0.6.12-20191113
 # File:         ec2_builder-web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -17,8 +17,6 @@
 # Updates:
 #
 # Improvements to be made:
-# Action: Place this script in Git or S3, Change launch script to hold basic parameters and then pull this script down & execute it at launch. Then delete itself from the instance. Tie bbedit into git
-# Action: check_pid_lock needs a max timeout so it doesnt run forever. Consider self-healing for yum as well.
 # Action: MariaDB fails to start in the script, expect it needs to wait for something to complete
 # Action: Create a shared lets encrypt config so that all the web hosts will renew the certificates for vhosts, irrespective of which host registered the certificate. But will also need to renew its own certificate held on EBS
 # Action: Configure a local DB, Aurora Serverless resume is too slow (~25s)
@@ -61,10 +59,23 @@
 # Define the functions
 #--------------------------------------
 check_pid_lock () {
+  sleep_count=0
   while [ -f "/var/run/${1}.pid" ]
   do
-    echo "...Waiting for ${1} to exit"
-    sleep 2
+    if [ ${sleep_count} -ge 90 ]
+    then
+      feedback h3 "Giving up waiting for ${1} to exit after 90 seconds"
+      break
+    fi
+    if [ `ps aux | grep -v grep | grep ${1} | wc -l` -ge 1 ]
+    then
+      echo "...Waiting for ${1} to exit"
+      sleep 2
+      sleep_count=$(( ${sleep_count} + 2 ))
+    else
+      feedback h3 "Deleting the PID file for ${1} because the process is not running"
+      rm -f "/var/run/${1}.pid"
+    fi
   done
 }
 
@@ -72,23 +83,23 @@ feedback () {
   echo ''
   if [ "$1" == "title" ]
   then
-    echo '******************************************************************************************'
-    echo '*                                                                                        *'
+    echo '********************************************************************************'
+    echo '*                                                                              *'
     echo "*      $2"
-    echo '*                                                                                        *'
-    echo '******************************************************************************************'
+    echo '*                                                                              *'
+    echo '********************************************************************************'
   elif [ "$1" == "h1" ]
   then
-    echo '=========================================================================================='
+    echo '================================================================================'
     echo " $2"
-    echo '------------------------------------------------------------------------------------------'
+    echo '--------------------------------------------------------------------------------'
   elif [ "$1" == "h2" ]
   then
-    echo '=========================================================================================='
-    echo "==> $2"
+    echo '================================================================================'
+    echo "--> $2"
   elif [ "$1" == "h3" ]
   then
-    echo '------------------------------------------------------------------------------------------'
+    echo '--------------------------------------------------------------------------------'
     echo "--> $2"
   else
     echo "*** Error in the feedback function using parameters"
@@ -108,7 +119,7 @@ install_pkg () {
 #======================================
 # Declare the constants
 #--------------------------------------
-feedback title 'Launch script started'
+feedback title 'Build script started'
 
 # Define the keys constants to decide what we are building
 tenancy='cakeIT'
@@ -251,8 +262,10 @@ install_pkg 'mariadb'
 # Install MariaDB server to host databases as Aurora Serverless resume is too slow (~25s)
 feedback h1 'Install the MariaDB server'
 install_pkg 'mariadb-server'
+feedback h3 'Sleep for 10 seconds as the database server wont start immediately'
+sleep 10
 feedback h3 'Start the database server and set it to auto start at boot'
-systemctl start mariadb
+systemctl restart mariadb
 systemctl enable mariadb
 
 # Install the web server - https://mozilla.github.io/server-side-tls/ssl-config-generator/
@@ -260,7 +273,7 @@ feedback h1 'Install the web server'
 amazon-linux-extras install -y httpd_modules
 install_pkg 'httpd mod_ssl'
 feedback h3 'Start the web server and set it to auto start at boot'
-systemctl start httpd
+systemctl restart httpd
 systemctl enable httpd
 
 # Customise the web server config
@@ -325,4 +338,4 @@ chmod 0700 /etc/cron.daily/certbot
 systemctl restart crond
 
 # Thats all I wrote
-feedback title "Launch script finished - https://${instance_id}.${hosting_domain}/wiki/"
+feedback title "Build script finished - https://${instance_id}.${hosting_domain}/wiki/"

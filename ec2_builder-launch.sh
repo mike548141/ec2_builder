@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.0.2-20191113
+# Version:      0.0.3-20191113
 # File:         ec2_builder-launch.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -25,11 +25,43 @@
 #======================================
 # Define the functions
 #--------------------------------------
+feedback () {
+  echo ''
+  if [ "$1" == "title" ]
+  then
+    echo '********************************************************************************'
+    echo '*                                                                              *'
+    echo "*      $2"
+    echo '*                                                                              *'
+    echo '********************************************************************************'
+  elif [ "$1" == "h1" ]
+  then
+    echo '================================================================================'
+    echo " $2"
+    echo '--------------------------------------------------------------------------------'
+  elif [ "$1" == "h2" ]
+  then
+    echo '================================================================================'
+    echo "--> $2"
+  elif [ "$1" == "h3" ]
+  then
+    echo '--------------------------------------------------------------------------------'
+    echo "--> $2"
+  else
+    echo "*** Error in the feedback function using parameters"
+    echo "*** P0: $0"
+    echo "*** P1: $1"
+    echo "*** P2: $2"
+  fi
+  echo ''
+}
 
 #======================================
 # Declare the constants
 #--------------------------------------
-echo 'Setting the initial constants'
+feedback title 'Launch script started'
+
+feedback h3 'Setting the initial constants'
 # Define the keys constants to decide what we are building
 tenancy='cakeIT'
 resource_environment='prod'
@@ -51,12 +83,12 @@ github_api_token=`aws ssm get-parameter --name "${common_parameters}/github/api_
 #======================================
 # Lets get into it
 #--------------------------------------
-echo 'Download the build script'
+feedback h3 'Download the build script'
 cd /root
 curl -H "Authorization: token ${github_api_token}" \
 -H 'Accept: application/vnd.github.v4.raw' \
 -O -L "https://raw.githubusercontent.com/mike548141/ec2_builder/master/${app}"
 
 chmod 0700 "/root/${app}"
-echo 'Execute the build script'
+feedback h3 'Execute the build script'
 "/root/${app}"
