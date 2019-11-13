@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 #
-# Author:			Mike Clements, Competitive Edge
-# Version:			0.6.9-20191113
-# File:				ec2_builder-web_server.sh
-# License:			GNU GPL v3
-# Language:			bash
-#
-# Pre-requisite:
-#  The script is dependent upon its IAM role (arn:aws:iam::954095588241:role/ec2-web.cakeit.nz) and the IAM user (arn:aws:iam::954095588241:user/ec2.web2.cakeit.nz) for permissions
+# Author:       Mike Clements, Competitive Edge
+# Version:      0.6.10-20191113
+# File:         ec2_builder-web_server.sh
+# License:      GNU GPL v3
+# Language:     bash
 #
 # Description:
 #  Produces a cakeIT web server, developed on an Amazon Linux 2 AMI.
 #
 # References:
+#
+# Pre-requisite:
+#  The script is dependent upon its IAM role (arn:aws:iam::954095588241:role/ec2-web.cakeit.nz) and the IAM user (arn:aws:iam::954095588241:user/ec2.web2.cakeit.nz) for permissions
 #
 # Updates:
 #
@@ -110,11 +110,13 @@ install_pkg () {
 #--------------------------------------
 feedback title 'Launch script started'
 
-tenancy='cakeIT'
-resource_environment='prod'
-service_group='web.cakeit.nz'
-app='ec2_builder-web_server.sh'
+# Define the keys constants to decide what we are building
+#tenancy='cakeIT'
+#resource_environment='prod'
+#service_group='web.cakeit.nz'
+#app='ec2_builder-web_server.sh'
 
+# Define the parameter store structure
 common_parameters="/${tenancy}/${resource_environment}/common"
 app_parameters="/${tenancy}/${resource_environment}/${service_group}/${app}"
 # The initial AWS region setting using the instances placement so that we can connect to the AWS SSM parameter store
