@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.0.3-20191113
+# Version:      0.0.4-20191113
 # File:         ec2_builder-launch.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -86,9 +86,9 @@ github_api_token=`aws ssm get-parameter --name "${common_parameters}/github/api_
 feedback h3 'Download the build script'
 cd /root
 curl -H "Authorization: token ${github_api_token}" \
--H 'Accept: application/vnd.github.v4.raw' \
--O -L "https://raw.githubusercontent.com/mike548141/ec2_builder/master/${app}"
-
+     -H 'Accept: application/vnd.github.v4.raw' \
+     -O -L "https://raw.githubusercontent.com/mike548141/ec2_builder/master/${app}"
 chmod 0700 "/root/${app}"
+
 feedback h3 'Execute the build script'
 "/root/${app}"

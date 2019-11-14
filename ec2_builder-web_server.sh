@@ -110,7 +110,7 @@ feedback () {
 }
 
 install_pkg () {
-  cat /proc/meminfo
+  #cat /proc/meminfo
   check_pid_lock 'yum'
   yum install -y $1
   check_pid_lock 'yum'
@@ -326,14 +326,17 @@ install_pkg 'certbot python2-certbot-apache'
 # Create and install this instances certificates, these will be kept locally on EBS.  All vhost certificates need to be kept on EFS.
 feedback h2 'Get Lets Encrypt certificates for this server'
 certbot certonly --domains "${instance_id}.${hosting_domain},web2.${hosting_domain}" --apache --non-interactive --agree-tos --email "${pki_email}" --no-eff-email --logs-dir "${vhost_root}/_default_/logs/letsencrypt" --redirect --must-staple --staple-ocsp --hsts --uir
-# Customise the config to include the new certificate
-feedback h3 'Add the certificates to the web server config'
-sed -i "s|^  SSLCertificateFile |  #SSLCertificateFile |g" /etc/httpd/conf.d/this-instance.conf
-sed -i "s|^  SSLCertificateKeyFile |  #SSLCertificateKeyFile |g" /etc/httpd/conf.d/this-instance.conf
-sed -i "s|^  #SSLCertificateFile /etc/letsencrypt/live|  SSLCertificateFile /etc/letsencrypt/live|" /etc/httpd/conf.d/this-instance.conf
-sed -i "s|^  #SSLCertificateKeyFile /etc/letsencrypt/live|  SSLCertificateKeyFile /etc/letsencrypt/live|" /etc/httpd/conf.d/this-instance.conf
-feedback h3 'Restart the web server'
-systemctl restart httpd
+# Customise the config to include the new certificate created by certbot
+if [[ -f '/etc/letsencrypt/live/i-0da447fe0429f7813.cakeit.nz/fullchain.pem' && -f '/etc/letsencrypt/live/i-0da447fe0429f7813.cakeit.nz/privkey.pem' ]]
+then
+  feedback h3 'Add the certificates to the web server config'
+  sed -i "s|^  SSLCertificateFile |  #SSLCertificateFile |g" /etc/httpd/conf.d/this-instance.conf
+  sed -i "s|^  SSLCertificateKeyFile |  #SSLCertificateKeyFile |g" /etc/httpd/conf.d/this-instance.conf
+  sed -i "s|^  #SSLCertificateFile /etc/letsencrypt/live|  SSLCertificateFile /etc/letsencrypt/live|" /etc/httpd/conf.d/this-instance.conf
+  sed -i "s|^  #SSLCertificateKeyFile /etc/letsencrypt/live|  SSLCertificateKeyFile /etc/letsencrypt/live|" /etc/httpd/conf.d/this-instance.conf
+  feedback h3 'Restart the web server'
+  systemctl restart httpd
+fi
 # Add a job to cron to run certbot regularly for renewals and revocations
 feedback h3 'Add a job to cron to run certbot regularly'
 echo '#!/usr/bin/env bash'> /etc/cron.daily/certbot
