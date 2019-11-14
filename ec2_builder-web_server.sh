@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.6.14-20191113
+# Version:      0.7.0-20191113
 # File:         ec2_builder-web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -110,6 +110,7 @@ feedback () {
 }
 
 install_pkg () {
+  cat /proc/meminfo
   check_pid_lock 'yum'
   yum install -y $1
   check_pid_lock 'yum'
