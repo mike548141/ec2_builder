@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.0-20191113
+# Version:      0.7.1-20191113
 # File:         ec2_builder-web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -136,7 +136,7 @@ aws_region=`ec2-metadata --availability-zone | cut -c 12-20`
 # Configuration parameters are held in AWS Systems Manager Parameter Store, retrieving these using the AWC CLI. Permissions are granted to do this using a IAM role assigned to the instance
 feedback h1 'Collecting info from AWS Systems Manager Parameter Store'
 # Delete the AWS credentials file so that his uses the instances profile/role
-if test -f '/root/.aws/credentials'
+if [ -f '/root/.aws/credentials' ]
 then
   rm -f '/root/.aws/credentials'
 fi
