@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.6.12-20191113
+# Version:      0.6.13-20191113
 # File:         ec2_builder-web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -17,7 +17,6 @@
 # Updates:
 #
 # Improvements to be made:
-# Action: MariaDB fails to start in the script, expect it needs to wait for something to complete
 # Action: Create a shared lets encrypt config so that all the web hosts will renew the certificates for vhosts, irrespective of which host registered the certificate. But will also need to renew its own certificate held on EBS
 # Action: Configure a local DB, Aurora Serverless resume is too slow (~25s)
 # Action: Keep all temporal data with vhost e.g. php session and cache data. And configure PHP security features like chroot
@@ -135,6 +134,11 @@ aws_region=`ec2-metadata --availability-zone | cut -c 12-20`
 
 # Configuration parameters are held in AWS Systems Manager Parameter Store, retrieving these using the AWC CLI. Permissions are granted to do this using a IAM role assigned to the instance
 feedback h1 'Collecting info from AWS Systems Manager Parameter Store'
+# Delete the AWS credentials file so that his uses the instances profile/role
+if test -f '/root/.aws/credentials'
+then
+  rm -f '/root/.aws/credentials'
+fi
 # Default config for AWS CLI tools
 aws_region=`aws ssm get-parameter --name "${app_parameters}/awscli/aws_region" --query 'Parameter.Value' --output text --region ${aws_region}`
 aws_cli_output=`aws ssm get-parameter --name "${app_parameters}/awscli/aws_cli_output" --query 'Parameter.Value' --output text --region ${aws_region}`
@@ -262,7 +266,7 @@ install_pkg 'mariadb'
 # Install MariaDB server to host databases as Aurora Serverless resume is too slow (~25s)
 feedback h1 'Install the MariaDB server'
 install_pkg 'mariadb-server'
-feedback h3 'Sleep for 10 seconds as the database server wont start immediately'
+feedback h3 'Sleep for 10 seconds as the database server wont start immediately after install'
 sleep 10
 feedback h3 'Start the database server and set it to auto start at boot'
 systemctl restart mariadb
