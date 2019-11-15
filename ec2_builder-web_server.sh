@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.1-20191113
+# Version:      0.7.2-20191113
 # File:         ec2_builder-web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -17,7 +17,8 @@
 # Updates:
 #
 # Improvements to be made:
-# Action: Create a shared lets encrypt config so that all the web hosts will renew the certificates for vhosts, irrespective of which host registered the certificate. But will also need to renew its own certificate held on EBS
+# Action: Ensure that when Lets Encrypt renews a vhosts certificate that it stores the latest versions on EFS with the vhost, not on EBS
+# Action: Need a shared user directory for PAM/users. So that file ownership on EFS is the same on all instances
 # Action: Configure a local DB, Aurora Serverless resume is too slow (~25s)
 # Action: Keep all temporal data with vhost e.g. php session and cache data. And configure PHP security features like chroot
 # Action: Import my confluence download and any other info into the wiki
@@ -51,24 +52,30 @@
 #
 
 #======================================
-# Define the arrays
+# Declare the arrays
 #--------------------------------------
 
 #======================================
-# Define the functions
+# Declare the functions
 #--------------------------------------
 check_pid_lock () {
   sleep_count=0
+  if [[ ${2} -ge 0 && ${2} -le 3600 ]]
+  then
+    max_timer=${2}
+  else
+    max_timer=90
+  fi
   while [ -f "/var/run/${1}.pid" ]
   do
-    if [ ${sleep_count} -ge 90 ]
+    if [ ${sleep_count} -ge ${max_timer} ]
     then
-      feedback h3 "Giving up waiting for ${1} to exit after 90 seconds"
+      feedback h3 "Giving up waiting for ${1} to exit after ${max_timer} seconds"
       break
     fi
     if [ `ps aux | grep -v grep | grep ${1} | wc -l` -ge 1 ]
     then
-      echo "...Waiting for ${1} to exit"
+      echo "...Waiting 2 seconds for ${1} to exit"
       sleep 2
       sleep_count=$(( ${sleep_count} + 2 ))
     else
@@ -80,39 +87,39 @@ check_pid_lock () {
 
 feedback () {
   echo ''
-  if [ "$1" == "title" ]
+  if [ "${1}" == "title" ]
   then
     echo '********************************************************************************'
     echo '*                                                                              *'
-    echo "*      $2"
+    echo "*      ${2}"
     echo '*                                                                              *'
     echo '********************************************************************************'
-  elif [ "$1" == "h1" ]
+  elif [ "${1}" == "h1" ]
   then
     echo '================================================================================'
-    echo " $2"
+    echo " ${2}"
     echo '--------------------------------------------------------------------------------'
-  elif [ "$1" == "h2" ]
+  elif [ "${1}" == "h2" ]
   then
     echo '================================================================================'
-    echo "--> $2"
-  elif [ "$1" == "h3" ]
+    echo "--> ${2}"
+  elif [ "${1}" == "h3" ]
   then
     echo '--------------------------------------------------------------------------------'
-    echo "--> $2"
+    echo "--> ${2}"
   else
     echo "*** Error in the feedback function using parameters"
-    echo "*** P0: $0"
-    echo "*** P1: $1"
-    echo "*** P2: $2"
+    echo "*** P0: ${0}"
+    echo "*** P1: ${1}"
+    echo "*** P2: ${2}"
   fi
   echo ''
 }
 
 install_pkg () {
-  #cat /proc/meminfo
+  #cat /proc/meminfo      # Check if there is enough free memory?
   check_pid_lock 'yum'
-  yum install -y $1
+  yum install -y ${1}
   check_pid_lock 'yum'
 }
 
@@ -132,10 +139,12 @@ common_parameters="/${tenancy}/${resource_environment}/common"
 app_parameters="/${tenancy}/${resource_environment}/${service_group}/${app}"
 # The initial AWS region setting using the instances placement so that we can connect to the AWS SSM parameter store
 aws_region=`ec2-metadata --availability-zone | cut -c 12-20`
+# Get the instance name
+instance_id=`ec2-metadata --instance-id | cut -c 14-`
 
 # Configuration parameters are held in AWS Systems Manager Parameter Store, retrieving these using the AWC CLI. Permissions are granted to do this using a IAM role assigned to the instance
 feedback h1 'Collecting info from AWS Systems Manager Parameter Store'
-# Delete the AWS credentials file so that his uses the instances profile/role
+# Delete the AWS credentials file so that the AWS CLI uses the instances profile/role permissions
 if [ -f '/root/.aws/credentials' ]
 then
   rm -f '/root/.aws/credentials'
@@ -160,11 +169,9 @@ s3_bucket=`aws ssm get-parameter --name "${app_parameters}/s3_bucket" --query 'P
 pki_email=`aws ssm get-parameter --name "${app_parameters}/pki_email" --query 'Parameter.Value' --output text --region ${aws_region}`
 # The AWS Elastic IP address used to web host
 eip_allocation_id=`aws ssm get-parameter --name "${app_parameters}/eip_allocation_id" --query 'Parameter.Value' --output text --region ${aws_region}`
-# Gather instance specific information
-instance_id=`ec2-metadata --instance-id | cut -c 14-`
 
 #======================================
-# Declare the variables
+# Set the initial values for the variables
 #--------------------------------------
 # Gather instance specific information
 public_ipv4=`ec2-metadata --public-ipv4 | cut -c 14-`
@@ -208,7 +215,7 @@ echo "# Mount AWS EFS volume ${efs_volume} for the web root data">> /etc/fstab
 echo "${efs_volume}:/ /mnt/efs efs tls,_netdev 0 0">> /etc/fstab
 # Create a directory for this instances log files on the EFS volume
 feedback h2 'Create a space for this instances log files on the EFS volume'
-mkdir --parents "${vhost_root}/_default_/logs/${instance_id}.${hosting_domain}"
+mkdir --parents "${vhost_root}/_default_/log/${instance_id}.${hosting_domain}"
 
 # Install Fuse S3FS and mount the S3 bucket for web server data - https://github.com/s3fs-fuse/s3fs-fuse
 feedback h1 'Install Fuse S3FS'
@@ -267,8 +274,8 @@ install_pkg 'mariadb'
 # Install MariaDB server to host databases as Aurora Serverless resume is too slow (~25s)
 feedback h1 'Install the MariaDB server'
 install_pkg 'mariadb-server'
-feedback h3 'Sleep for 10 seconds as the database server wont start immediately after install'
-sleep 10
+feedback h3 'Sleep for 5 seconds as the database server wont start immediately after install'
+sleep 5
 feedback h3 'Start the database server and set it to auto start at boot'
 systemctl restart mariadb
 systemctl enable mariadb
@@ -316,8 +323,8 @@ curl -X POST "https://api.cloudflare.com/client/v4/zones/${cloudflare_zoneid}/dn
      -H "Authorization: Bearer ${cloudflare_api_token}" \
      -H "Content-Type: application/json" \
      --data '{"type":"A","name":"'"${instance_id}"'","content":"'"${public_ipv4}"'","ttl":1,"priority":10,"proxied":false}'
-feedback h3 'Sleeping for 10 seconds to allow that DNS change to replicate'
-sleep 10
+feedback h3 'Sleeping for 5 seconds to allow that DNS change to replicate'
+sleep 5
 
 # Install Let's Encrypt CertBot, requires EPEL
 feedback h1 'Install Lets Encrypt CertBot'
@@ -325,18 +332,30 @@ install_pkg 'certbot python2-certbot-apache'
 
 # Create and install this instances certificates, these will be kept locally on EBS.  All vhost certificates need to be kept on EFS.
 feedback h2 'Get Lets Encrypt certificates for this server'
-certbot certonly --domains "${instance_id}.${hosting_domain},web2.${hosting_domain}" --apache --non-interactive --agree-tos --email "${pki_email}" --no-eff-email --logs-dir "${vhost_root}/_default_/logs/letsencrypt" --redirect --must-staple --staple-ocsp --hsts --uir
+certbot certonly --domains "${instance_id}.${hosting_domain},web2.${hosting_domain}" --apache --non-interactive --agree-tos --email "${pki_email}" --no-eff-email --logs-dir "${vhost_root}/_default_/log/letsencrypt" --redirect --must-staple --staple-ocsp --hsts --uir
 # Customise the config to include the new certificate created by certbot
 if [[ -f '/etc/letsencrypt/live/i-0da447fe0429f7813.cakeit.nz/fullchain.pem' && -f '/etc/letsencrypt/live/i-0da447fe0429f7813.cakeit.nz/privkey.pem' ]]
 then
   feedback h3 'Add the certificates to the web server config'
-  sed -i "s|^  SSLCertificateFile |  #SSLCertificateFile |g" /etc/httpd/conf.d/this-instance.conf
-  sed -i "s|^  SSLCertificateKeyFile |  #SSLCertificateKeyFile |g" /etc/httpd/conf.d/this-instance.conf
-  sed -i "s|^  #SSLCertificateFile /etc/letsencrypt/live|  SSLCertificateFile /etc/letsencrypt/live|" /etc/httpd/conf.d/this-instance.conf
-  sed -i "s|^  #SSLCertificateKeyFile /etc/letsencrypt/live|  SSLCertificateKeyFile /etc/letsencrypt/live|" /etc/httpd/conf.d/this-instance.conf
+  sed -i "s|^  SSLCertificateFile|  #SSLCertificateFile|g" /etc/httpd/conf.d/this-instance.conf
+  sed -i "s|^  SSLCertificateKeyFile|  #SSLCertificateKeyFile|g" /etc/httpd/conf.d/this-instance.conf
+  sed -i "s|^  #SSLCertificateFile		/etc/letsencrypt/live/|  SSLCertificateFile		/etc/letsencrypt/live/|" /etc/httpd/conf.d/this-instance.conf
+  sed -i "s|^  #SSLCertificateKeyFile		/etc/letsencrypt/live/|  SSLCertificateKeyFile		/etc/letsencrypt/live/|" /etc/httpd/conf.d/this-instance.conf
   feedback h3 'Restart the web server'
   systemctl restart httpd
 fi
+# Link each of the vhosts listed in vhosts-httpd.conf to letsencrypt on this instance. So that all instances can renew all certificates as required
+feedback h3 'Include the vhosts Lets Encrypt config on this server'
+vhost_list=`grep -i '^include ' ${vhost_root}/vhosts-httpd.conf | sed "s|[iI]nclude \"${vhost_root}/||g; s|/conf/httpd.conf\"||g;"`
+for vhost in ${vhost_list}
+do
+  if [ -f "${vhost_root}/${vhost}/conf/pki.conf" ]
+  then
+    ln -s "${vhost_root}/${vhost}/conf/pki.conf" "/etc/letsencrypt/renewal/${vhost}.conf"
+  else
+    feedback h3 "Error: PKI config file missing for ${vhost}"
+  fi
+done
 # Add a job to cron to run certbot regularly for renewals and revocations
 feedback h3 'Add a job to cron to run certbot regularly'
 echo '#!/usr/bin/env bash'> /etc/cron.daily/certbot
