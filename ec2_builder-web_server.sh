@@ -352,7 +352,8 @@ sleep 5
 
 # Install Let's Encrypt CertBot, requires EPEL
 feedback h1 'Install Lets Encrypt CertBot'
-install_pkg 'certbot python2-certbot-apache'
+# !! install_pkg 'certbot python2-certbot-apache'
+yum install -y certbot python2-certbot-apache
 
 # Create and install this instances certificates, these will be kept locally on EBS.  All vhost certificates need to be kept on EFS.
 feedback h2 'Get Lets Encrypt certificates for this server'
