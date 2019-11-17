@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.5-20191116
+# Version:      0.7.6-20191116
 # File:         ec2_builder-web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -70,7 +70,7 @@ check_pid_lock () {
   do
     if [[ ${sleep_count} -ge ${max_timer} ]]
     then
-      feedback error "Giving up waiting for ${1} to exit after ${sleep_count} seconds"
+      feedback error "Giving up waiting for ${1} to exit after ${sleep_count} of ${max_timer} seconds"
       break
     fi
     if [ `ps aux | grep -v grep | grep ${1} | wc -l` -ge 1 ]
@@ -101,12 +101,13 @@ feedback () {
     echo ''
     echo '================================================================================'
     echo "    ${2}"
-    echo '--------------------------------------------------------------------------------'
+    echo '================================================================================'
     echo ''
   elif [ "${1}" == "h2" ]
   then
     echo '================================================================================'
     echo "--> ${2}"
+    echo '--------------------------------------------------------------------------------'
   elif [ "${1}" == "h3" ]
   then
     echo '--------------------------------------------------------------------------------'
@@ -355,7 +356,8 @@ install_pkg 'certbot python2-certbot-apache'
 
 # Create and install this instances certificates, these will be kept locally on EBS.  All vhost certificates need to be kept on EFS.
 feedback h2 'Get Lets Encrypt certificates for this server'
-certbot certonly --domains "${instance_id}.${hosting_domain},web2.${hosting_domain}" --apache --non-interactive --agree-tos --email "${pki_email}" --no-eff-email --logs-dir "${vhost_root}/_default_/log/letsencrypt" --redirect --must-staple --staple-ocsp --hsts --uir
+mkdir --parents "${vhost_root}/_default_/log/${instance_id}.${hosting_domain}/letsencrypt"
+certbot certonly --domains "${instance_id}.${hosting_domain},web2.${hosting_domain}" --apache --non-interactive --agree-tos --email "${pki_email}" --no-eff-email --logs-dir "${vhost_root}/_default_/log/${instance_id}.${hosting_domain}/letsencrypt" --redirect --must-staple --staple-ocsp --hsts --uir
 # Customise the config to include the new certificate created by certbot
 if [[ -f "/etc/letsencrypt/live/${instance_id}.${hosting_domain}/fullchain.pem" && -f "/etc/letsencrypt/live/${instance_id}.${hosting_domain}/privkey.pem" ]]
 then
