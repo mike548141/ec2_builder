@@ -1,51 +1,51 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.2-20191113
+# Version:      0.7.4-20191116
 # File:         ec2_builder-web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
 #
 # Description:
-#  Produces a cakeIT web server, developed on an Amazon Linux 2 AMI.
+#   Produces a cakeIT web server, developed on an Amazon Linux 2 AMI.
 #
 # References:
 #
 # Pre-requisite:
-#  The script is dependent upon its IAM role (arn:aws:iam::954095588241:role/ec2-web.cakeit.nz) and the IAM user (arn:aws:iam::954095588241:user/ec2.web2.cakeit.nz) for permissions
+#   The script is dependent upon its IAM role (arn:aws:iam::954095588241:role/ec2-web.cakeit.nz) and the IAM user (arn:aws:iam::954095588241:user/ec2.web2.cakeit.nz) for permissions
 #
 # Updates:
 #
 # Improvements to be made:
-# Action: Ensure that when Lets Encrypt renews a vhosts certificate that it stores the latest versions on EFS with the vhost, not on EBS
-# Action: Need a shared user directory for PAM/users. So that file ownership on EFS is the same on all instances
-# Action: Configure a local DB, Aurora Serverless resume is too slow (~25s)
-# Action: Keep all temporal data with vhost e.g. php session and cache data. And configure PHP security features like chroot
-# Action: Import my confluence download and any other info into the wiki
-# Action: Add support to run both PHP 5 and 7
-#  - https://stackoverflow.com/questions/42696856/running-two-php-versions-on-the-same-server
-#  - https://stackoverflow.com/questions/45033511/how-to-select-php-version-5-and-7-per-virtualhost-in-apache-2-4-on-debian
-# Action: Automate backups of web data (config, DB & files) at the same timestamp to allow easy recovery
+#   Action: Ensure that when Lets Encrypt renews a vhosts certificate that it stores the latest versions on EFS with the vhost, not on EBS
+#   Action: Need a shared user directory for PAM/users. So that file ownership on EFS is the same on all instances
+#   Action: Configure a local DB, Aurora Serverless resume is too slow (~25s)
+#   Action: Keep all temporal data with vhost e.g. php session and cache data. And configure PHP security features like chroot
+#   Action: Import my confluence download and any other info into the wiki
+#   Action: Add support to run both PHP 5 and 7
+#     - https://stackoverflow.com/questions/42696856/running-two-php-versions-on-the-same-server
+#     - https://stackoverflow.com/questions/45033511/how-to-select-php-version-5-and-7-per-virtualhost-in-apache-2-4-on-debian
+#   Action: Automate backups of web data (config, DB & files) at the same timestamp to allow easy recovery
 #
-# Action: Move websites to web2
+#   Action: Move websites to web2
 #
-# Action: Run the processes that are specific to a vhost as its own user. Q-Username should be domain name or a cn like competitive_edge?
-# Action: Configure security apps for defense in depth, take ideas from my suse studio scripts
-# Action: Add self-testing and self-healing to the build script to make sure everything is built and working properly e.g. did the DNS record create successfully
+#   Action: Run the processes that are specific to a vhost as its own user. Q-Username should be domain name or a cn like competitive_edge?
+#   Action: Configure security apps for defense in depth, take ideas from my suse studio scripts
+#   Action: Add self-testing and self-healing to the build script to make sure everything is built and working properly e.g. did the DNS record create successfully
 #
-# Action: SES for mail relay? So don't need SMTP out from server
-# Action: Install Tomcat?
-# Action: Static web data on S3, use a shared bucket to keep admin easy. Ideal would be a bucket per customer for security.
+#   Action: SES for mail relay? So don't need SMTP out from server
+#   Action: Install Tomcat?
+#   Action: Static web data on S3, use a shared bucket to keep admin easy. Ideal would be a bucket per customer for security.
 #
-# Action: Upgrade to load balancing the web serving work across 2 or more instances
-# Action: Upgrade to multi-AZ, or even multi-region for all components.
-# Action: Move to a multi-account structure using AWS Organisations. Use AWS CloudFormer to define all the resources in a template.
-# Action: Is there a way to make the AWS AMI (Amazon Linux 2) as read only base, and all writes from this script, users logging in, or system use (e.g. logging) are written to a 2nd EBS volume?
+#   Action: Upgrade to load balancing the web serving work across 2 or more instances
+#   Action: Upgrade to multi-AZ, or even multi-region for all components.
+#   Action: Move to a multi-account structure using AWS Organisations. Use AWS CloudFormer to define all the resources in a template.
+#   Action: Is there a way to make the AWS AMI (Amazon Linux 2) as read only base, and all writes from this script, users logging in, or system use (e.g. logging) are written to a 2nd EBS volume?
 #
-# Action: Get all S3 data into right storage tier. Files smaller than ?128KB? on S3IA or S3. Data larger than that in Deep Archive. Check inventory files.
+#   Action: Get all S3 data into right storage tier. Files smaller than ?128KB? on S3IA or S3. Data larger than that in Deep Archive. Check inventory files.
 #
-# Question: Can I shrink the EBS volume, its 8 GB but using 2.3GB
-# Question: Launch instance has a mount EFS volume option, is this better than what I have scripted? Can't find option in launch template
+#   Question: Can I shrink the EBS volume, its 8 GB but using 2.3GB
+#   Question: Launch instance has a mount EFS volume option, is this better than what I have scripted? Can't find option in launch template
 #
 # useradd competitive_edge --home-dir /mnt/efs/vhost/cakeit.nz
 # chown -R competitive_edge:apache /mnt/efs/vhost/cakeit.nz
@@ -56,7 +56,7 @@
 #--------------------------------------
 
 #======================================
-# Declare the functions
+# Declare the libraries and functions
 #--------------------------------------
 check_pid_lock () {
   sleep_count=0
@@ -68,7 +68,7 @@ check_pid_lock () {
   fi
   while [ -f "/var/run/${1}.pid" ]
   do
-    if [ ${sleep_count} -ge ${max_timer} ]
+    if [[ ${sleep_count} -ge ${max_timer} ]]
     then
       feedback h3 "Giving up waiting for ${1} to exit after ${max_timer} seconds"
       break
@@ -80,25 +80,29 @@ check_pid_lock () {
       sleep_count=$(( ${sleep_count} + 2 ))
     else
       feedback h3 "Deleting the PID file for ${1} because the process is not running"
-      rm -f "/var/run/${1}.pid"
+      sleep 2
+      rm "/var/run/${1}.pid"
     fi
   done
 }
 
 feedback () {
-  echo ''
   if [ "${1}" == "title" ]
   then
+    echo ''
     echo '********************************************************************************'
     echo '*                                                                              *'
-    echo "*      ${2}"
+    echo "*   ${2}"
     echo '*                                                                              *'
     echo '********************************************************************************'
+    echo ''
   elif [ "${1}" == "h1" ]
   then
+    echo ''
     echo '================================================================================'
-    echo " ${2}"
+    echo "    ${2}"
     echo '--------------------------------------------------------------------------------'
+    echo ''
   elif [ "${1}" == "h2" ]
   then
     echo '================================================================================'
@@ -107,26 +111,42 @@ feedback () {
   then
     echo '--------------------------------------------------------------------------------'
     echo "--> ${2}"
+  elif [ "${1}" == "body" ]
+  then
+    echo "    ${2}"
+  elif [ "${1}" == "error" ]
+  then
+    echo ''
+    echo '********************************************************************************'
+    echo " *** *** Error: ${2}"
+    echo ''
   else
-    echo "*** Error in the feedback function using parameters"
+    echo ''
+    echo "*** Error in the feedback function using the following parameters"
     echo "*** P0: ${0}"
     echo "*** P1: ${1}"
     echo "*** P2: ${2}"
+    echo ''
   fi
-  echo ''
 }
 
 install_pkg () {
-  #cat /proc/meminfo      # Check if there is enough free memory?
+  #cat /proc/meminfo      # !! Check if there is enough free memory?
   check_pid_lock 'yum'
   yum install -y ${1}
+  exit_code=${?}
+  if [ ${exit_code} -ne 0 ]
+  then
+    feedback error "Exit code ${exit_code} from yum"
+  fi
   check_pid_lock 'yum'
 }
 
 #======================================
 # Declare the constants
 #--------------------------------------
-feedback title 'Build script started'
+script_ver=`grep '^# Version:[ \t]*' ${0} | sed 's|# Version:[ \t]*||'`
+feedback title "Build script ${0} version ${script_ver} started"
 
 # Define the keys constants to decide what we are building
 tenancy='cakeIT'
@@ -162,9 +182,11 @@ cloudflare_zoneid=`aws ssm get-parameter --name "${common_parameters}/cloudflare
 cloudflare_api_token=`aws ssm get-parameter --name "${common_parameters}/cloudflare/${hosting_domain}/api_token" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption`
 # The AWS EFS volume and mount point used to hold virtual host config, content and logs that is shared between web hosts (aka instances)
 efs_volume=`aws ssm get-parameter --name "${app_parameters}/efs_volume" --query 'Parameter.Value' --output text --region ${aws_region}`
+efs_mount_point=`aws ssm get-parameter --name "${app_parameters}/efs_mount_point" --query 'Parameter.Value' --output text --region ${aws_region}`
 vhost_root=`aws ssm get-parameter --name "${app_parameters}/vhost_root" --query 'Parameter.Value' --output text --region ${aws_region}`
 # The AWS S3 volume used to hold web content that is shared between web hosts, not currently used but is cheaper than EFS
 s3_bucket=`aws ssm get-parameter --name "${app_parameters}/s3_bucket" --query 'Parameter.Value' --output text --region ${aws_region}`
+s3_mount_point=`aws ssm get-parameter --name "${app_parameters}/s3_mount_point" --query 'Parameter.Value' --output text --region ${aws_region}`
 # The contact email address for Lets Encrypt if a certificate problem comes up
 pki_email=`aws ssm get-parameter --name "${app_parameters}/pki_email" --query 'Parameter.Value' --output text --region ${aws_region}`
 # The AWS Elastic IP address used to web host
@@ -191,7 +213,7 @@ yum update -y
 
 # Install the management agents
 feedback h1 'Install the management agents'
-feedback h3 'AWS Systems Manager is installed by default, nothing left to do'
+feedback body 'AWS Systems Manager is installed by default, nothing left to do'
 #amazon-linux-extras install -y ansible2 rust1
 #install_pkg 'chef puppet'
 
@@ -208,11 +230,11 @@ install_pkg 'rkhunter tripwire'
 feedback h1 'Install AWS EFS helper'
 install_pkg 'amazon-efs-utils'
 feedback h2 'Mount the EFS volume for vhost data'
-mkdir --parents /mnt/efs
-mount -t efs -o tls ${efs_volume}:/ /mnt/efs
+mkdir --parents ${efs_mount_point}
+mount -t efs -o tls ${efs_volume}:/ ${efs_mount_point}
 feedback h3 'Set it to auto mount at boot'
 echo "# Mount AWS EFS volume ${efs_volume} for the web root data">> /etc/fstab
-echo "${efs_volume}:/ /mnt/efs efs tls,_netdev 0 0">> /etc/fstab
+echo "${efs_volume}:/ ${efs_mount_point} efs tls,_netdev 0 0">> /etc/fstab
 # Create a directory for this instances log files on the EFS volume
 feedback h2 'Create a space for this instances log files on the EFS volume'
 mkdir --parents "${vhost_root}/_default_/log/${instance_id}.${hosting_domain}"
@@ -228,11 +250,11 @@ aws configure set aws_secret_access_key ${aws_secret_access_key}
 aws configure set region ${aws_region}
 aws configure set output ${aws_cli_output}
 feedback h2 'Mount the S3 bucket for static web data'
-mkdir --parents /mnt/s3
-s3fs ${s3_bucket} /mnt/s3 -o allow_other -o use_path_request_style
+mkdir --parents ${s3_mount_point}
+s3fs ${s3_bucket} ${s3_mount_point} -o allow_other -o use_path_request_style
 feedback h3 'Set it to auto mount at boot'
 echo "# Mount AWS S3 bucket ${s3_bucket} for static web data">> /etc/fstab
-echo "s3fs#${s3_bucket} /mnt/s3 fuse _netdev,allow_other,use_path_request_style 0 0">> /etc/fstab
+echo "s3fs#${s3_bucket} ${s3_mount_point} fuse _netdev,allow_other,use_path_request_style 0 0">> /etc/fstab
 
 # Install scripting languages
 # Go & Ruby
@@ -334,13 +356,13 @@ install_pkg 'certbot python2-certbot-apache'
 feedback h2 'Get Lets Encrypt certificates for this server'
 certbot certonly --domains "${instance_id}.${hosting_domain},web2.${hosting_domain}" --apache --non-interactive --agree-tos --email "${pki_email}" --no-eff-email --logs-dir "${vhost_root}/_default_/log/letsencrypt" --redirect --must-staple --staple-ocsp --hsts --uir
 # Customise the config to include the new certificate created by certbot
-if [[ -f '/etc/letsencrypt/live/i-0da447fe0429f7813.cakeit.nz/fullchain.pem' && -f '/etc/letsencrypt/live/i-0da447fe0429f7813.cakeit.nz/privkey.pem' ]]
+if [[ -f "/etc/letsencrypt/live/${instance_id}.${hosting_domain}/fullchain.pem" && -f "/etc/letsencrypt/live/${instance_id}.${hosting_domain}/privkey.pem" ]]
 then
   feedback h3 'Add the certificates to the web server config'
-  sed -i "s|^  SSLCertificateFile|  #SSLCertificateFile|g" /etc/httpd/conf.d/this-instance.conf
-  sed -i "s|^  SSLCertificateKeyFile|  #SSLCertificateKeyFile|g" /etc/httpd/conf.d/this-instance.conf
-  sed -i "s|^  #SSLCertificateFile		/etc/letsencrypt/live/|  SSLCertificateFile		/etc/letsencrypt/live/|" /etc/httpd/conf.d/this-instance.conf
-  sed -i "s|^  #SSLCertificateKeyFile		/etc/letsencrypt/live/|  SSLCertificateKeyFile		/etc/letsencrypt/live/|" /etc/httpd/conf.d/this-instance.conf
+  sed -i "s|[^#]SSLCertificateFile| #SSLCertificateFile|g" /etc/httpd/conf.d/this-instance.conf
+  sed -i "s|[^#]SSLCertificateKeyFile| #SSLCertificateKeyFile|g" /etc/httpd/conf.d/this-instance.conf
+  sed -i "s|#SSLCertificateFile[ \t]*/etc/letsencrypt/live/|SSLCertificateFile\t\t/etc/letsencrypt/live/|" /etc/httpd/conf.d/this-instance.conf
+  sed -i "s|#SSLCertificateKeyFile[ \t]*/etc/letsencrypt/live/|SSLCertificateKeyFile\t\t/etc/letsencrypt/live/|" /etc/httpd/conf.d/this-instance.conf
   feedback h3 'Restart the web server'
   systemctl restart httpd
 fi
@@ -353,7 +375,7 @@ do
   then
     ln -s "${vhost_root}/${vhost}/conf/pki.conf" "/etc/letsencrypt/renewal/${vhost}.conf"
   else
-    feedback h3 "Error: PKI config file missing for ${vhost}"
+    feedback error "PKI config file missing for vhost ${vhost}"
   fi
 done
 # Add a job to cron to run certbot regularly for renewals and revocations
