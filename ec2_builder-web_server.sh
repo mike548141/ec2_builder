@@ -81,7 +81,7 @@ check_pid_lock () {
     else
       feedback error "Deleting the PID file for ${1} because the process is not running"
       sleep 2
-      # !! rm "/var/run/${1}.pid"
+      rm "/var/run/${1}.pid"
     fi
   done
 }
@@ -351,9 +351,9 @@ feedback h3 'Sleeping for 5 seconds to allow that DNS change to replicate'
 sleep 5
 
 # Install Let's Encrypt CertBot, requires EPEL
+sleep 90
 feedback h1 'Install Lets Encrypt CertBot'
-# !! install_pkg 'certbot python2-certbot-apache'
-yum install -y certbot python2-certbot-apache
+install_pkg 'certbot python2-certbot-apache'
 
 # Create and install this instances certificates, these will be kept locally on EBS.  All vhost certificates need to be kept on EFS.
 feedback h2 'Get Lets Encrypt certificates for this server'
