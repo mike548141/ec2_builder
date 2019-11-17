@@ -132,7 +132,6 @@ feedback () {
 }
 
 install_pkg () {
-  #cat /proc/meminfo      # !! Check if there is enough free memory?
   check_pid_lock 'yum'
   yum install -y ${1}
   exit_code=${?}
@@ -353,6 +352,7 @@ sleep 5
 # Install Let's Encrypt CertBot, requires EPEL
 sleep 90
 feedback h1 'Install Lets Encrypt CertBot'
+cat /proc/meminfo      # !! Check if there is enough free memory?
 install_pkg 'certbot python2-certbot-apache'
 
 # Create and install this instances certificates, these will be kept locally on EBS.  All vhost certificates need to be kept on EFS.
