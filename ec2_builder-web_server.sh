@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.4-20191116
+# Version:      0.7.5-20191116
 # File:         ec2_builder-web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -70,18 +70,18 @@ check_pid_lock () {
   do
     if [[ ${sleep_count} -ge ${max_timer} ]]
     then
-      feedback h3 "Giving up waiting for ${1} to exit after ${max_timer} seconds"
+      feedback error "Giving up waiting for ${1} to exit after ${sleep_count} seconds"
       break
     fi
     if [ `ps aux | grep -v grep | grep ${1} | wc -l` -ge 1 ]
     then
-      echo "...Waiting 2 seconds for ${1} to exit"
+      feedback body "...Waiting 2 seconds for ${1} to exit"
       sleep 2
       sleep_count=$(( ${sleep_count} + 2 ))
     else
-      feedback h3 "Deleting the PID file for ${1} because the process is not running"
+      feedback error "Deleting the PID file for ${1} because the process is not running"
       sleep 2
-      rm "/var/run/${1}.pid"
+      # !! rm "/var/run/${1}.pid"
     fi
   done
 }
@@ -113,12 +113,12 @@ feedback () {
     echo "--> ${2}"
   elif [ "${1}" == "body" ]
   then
-    echo "    ${2}"
+    echo "--> ${2}"
   elif [ "${1}" == "error" ]
   then
     echo ''
     echo '********************************************************************************'
-    echo " *** *** Error: ${2}"
+    echo " *** Error: ${2}"
     echo ''
   else
     echo ''
@@ -204,7 +204,7 @@ public_ipv4=`ec2-metadata --public-ipv4 | cut -c 14-`
 # Allocate the EIP to this instance
 feedback h1 'Allocate the EIP public IP address to this instance'
 aws ec2 associate-address --instance-id ${instance_id} --allocation-id ${eip_allocation_id} --region ${aws_region}
-# Disabled as its still showing the old IP address at this stage, not sure how long until ec2-metadata updates after the EIP is associated. Command now occurs just before Cloudflare is called
+# !! Disabled as its still showing the old IP address at this stage, not sure how long until ec2-metadata updates after the EIP is associated. Command now occurs just before Cloudflare is called
 #public_ipv4=`ec2-metadata --public-ipv4 | cut -c 14-`
 
 # Update the software stack
@@ -214,6 +214,7 @@ yum update -y
 # Install the management agents
 feedback h1 'Install the management agents'
 feedback body 'AWS Systems Manager is installed by default, nothing left to do'
+# !! Disabled as not required yet/at all
 #amazon-linux-extras install -y ansible2 rust1
 #install_pkg 'chef puppet'
 
@@ -229,10 +230,10 @@ install_pkg 'rkhunter tripwire'
 # Install AWS EFS helper and mount the EFS volume for vhost data
 feedback h1 'Install AWS EFS helper'
 install_pkg 'amazon-efs-utils'
-feedback h2 'Mount the EFS volume for vhost data'
+feedback h3 'Mount the EFS volume for vhost data'
 mkdir --parents ${efs_mount_point}
 mount -t efs -o tls ${efs_volume}:/ ${efs_mount_point}
-feedback h3 'Set it to auto mount at boot'
+feedback body 'Set it to auto mount at boot'
 echo "# Mount AWS EFS volume ${efs_volume} for the web root data">> /etc/fstab
 echo "${efs_volume}:/ ${efs_mount_point} efs tls,_netdev 0 0">> /etc/fstab
 # Create a directory for this instances log files on the EFS volume
@@ -249,10 +250,10 @@ aws configure set aws_access_key_id ${aws_access_key_id}
 aws configure set aws_secret_access_key ${aws_secret_access_key}
 aws configure set region ${aws_region}
 aws configure set output ${aws_cli_output}
-feedback h2 'Mount the S3 bucket for static web data'
+feedback h3 'Mount the S3 bucket for static web data'
 mkdir --parents ${s3_mount_point}
 s3fs ${s3_bucket} ${s3_mount_point} -o allow_other -o use_path_request_style
-feedback h3 'Set it to auto mount at boot'
+feedback body 'Set it to auto mount at boot'
 echo "# Mount AWS S3 bucket ${s3_bucket} for static web data">> /etc/fstab
 echo "s3fs#${s3_bucket} ${s3_mount_point} fuse _netdev,allow_other,use_path_request_style 0 0">> /etc/fstab
 
@@ -310,7 +311,7 @@ feedback h3 'Start the web server and set it to auto start at boot'
 systemctl restart httpd
 systemctl enable httpd
 
-# Customise the web server config
+# Customise the web server
 feedback h2 'Customise the web server config'
 # Install extra modules
 feedback h3 'Install additional Apache HTTPD modules'
