@@ -60,8 +60,11 @@
 #--------------------------------------
 check_pid_lock () {
   sleep_count=0
-  # !! Issues installing CertBot
-  if [[ ${2} =~ [0-9]{1,4} && ${2} -ge 0 && ${2} -le 3600 ]]
+  if [[ ${2} =~ [^0-9] ]]
+  then
+    feedback error 'check_pid_lock Invalid timer specified, using default of 90'
+    max_timer=90
+  elif [[ ${2} -ge 0 && ${2} -le 3600 ]]
   then
     max_timer=${2}
   else
@@ -139,11 +142,10 @@ install_pkg () {
   if [ ${exit_code} -ne 0 ]
   then
     feedback error "Exit code ${exit_code} from yum"
-    feedback error 'Retrying after 60 seconds'
+    feedback error 'Retrying install in 60 seconds'
     sleep 60
-    yum install -y ${1}
-    exit_code=${?}
-    feedback error "Exit code ${exit_code} from yum"
+    yum-complete-transaction -y
+    yum history redo last
   fi
   check_pid_lock 'yum'
 }
