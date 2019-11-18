@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.0.5-20191113
+# Version:      0.0.6-20191113
 # File:         ec2_builder-launch.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -40,25 +40,25 @@ feedback () {
     echo ''
     echo '================================================================================'
     echo "    ${2}"
-    echo '--------------------------------------------------------------------------------'
+    echo '================================================================================'
     echo ''
   elif [ "${1}" == "h2" ]
   then
     echo '================================================================================'
     echo "--> ${2}"
+    echo '--------------------------------------------------------------------------------'
   elif [ "${1}" == "h3" ]
   then
     echo '--------------------------------------------------------------------------------'
     echo "--> ${2}"
   elif [ "${1}" == "body" ]
   then
-    echo "    ${2}"
+    echo "--> ${2}"
   elif [ "${1}" == "error" ]
   then
     echo ''
     echo '********************************************************************************'
-    echo " *** *** Error: ${2}"
-    echo ''
+    echo " *** Error: ${2}"
   else
     echo ''
     echo "*** Error in the feedback function using the following parameters"
@@ -72,13 +72,16 @@ feedback () {
 #======================================
 # Declare the constants
 #--------------------------------------
-feedback title 'Launch script started'
+script_ver=`grep '^# Version:[ \t]*' ${0} | sed 's|# Version:[ \t]*||'`
+feedback title "Build script started"
+feedback body "Script: ${0}"
+feedback body "Version: ${script_ver}"
+feedback body "Started: `date`"
 
 feedback h3 'Setting the initial constants'
 # Define the keys constants to decide what we are building
 tenancy='cakeIT'
 resource_environment='prod'
-service_group='web.cakeit.nz'
 app='ec2_builder-web_server.sh'
 
 # Define the parameter store structure

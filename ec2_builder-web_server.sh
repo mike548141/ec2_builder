@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.7-20191116
+# Version:      0.7.8-20191119
 # File:         ec2_builder-web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -124,7 +124,6 @@ feedback () {
     echo ''
     echo '********************************************************************************'
     echo " *** Error: ${2}"
-    echo ''
   else
     echo ''
     echo "*** Error in the feedback function using the following parameters"
@@ -141,11 +140,13 @@ install_pkg () {
   exit_code=${?}
   if [ ${exit_code} -ne 0 ]
   then
-    feedback error "Exit code ${exit_code} from yum"
-    feedback error 'Retrying install in 60 seconds'
-    sleep 60
+    feedback error "yum exit code ${exit_code}"
+    feedback body 'Retrying install in 90 seconds'
+    sleep 90
     yum-complete-transaction -y
+    feedback body "Exit code ${?} from yum-complete-transaction"
     yum history redo last
+    feedback body "Exit code ${?} from yum history redo last"
   fi
   check_pid_lock 'yum'
 }
@@ -154,7 +155,10 @@ install_pkg () {
 # Declare the constants
 #--------------------------------------
 script_ver=`grep '^# Version:[ \t]*' ${0} | sed 's|# Version:[ \t]*||'`
-feedback title "Build script ${0} version ${script_ver} started"
+feedback title "Build script started"
+feedback body "Script: ${0}"
+feedback body "Version: ${script_ver}"
+feedback body "Started: `date`"
 
 # Define the keys constants to decide what we are building
 tenancy='cakeIT'
@@ -229,6 +233,7 @@ feedback body 'AWS Systems Manager is installed by default, nothing left to do'
 # Add access to Extra Packages for Enterprise Linux (EPEL) from the Fedora project
 feedback h1 'Add access to Extra Packages for Enterprise Linux (EPEL) from the Fedora project'
 amazon-linux-extras install -y epel
+# !! check_pid_lock 'amazon-linux-extras'
 
 # Install security apps, requires EPEL
 feedback h1 'Install host security apps'
@@ -359,8 +364,6 @@ sleep 5
 
 # Install Let's Encrypt CertBot, requires EPEL
 feedback h1 'Install Lets Encrypt CertBot'
-sleep 90               # !!
-cat /proc/meminfo      # !! Check if there is enough free memory?
 install_pkg 'certbot python2-certbot-apache'
 
 # Create and install this instances certificates, these will be kept locally on EBS.  All vhost certificates need to be kept on EFS.
