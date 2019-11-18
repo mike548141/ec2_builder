@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.6-20191116
+# Version:      0.7.7-20191116
 # File:         ec2_builder-web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -60,7 +60,8 @@
 #--------------------------------------
 check_pid_lock () {
   sleep_count=0
-  if [[ ${2} -ge 0 && ${2} -le 3600 ]]
+  # !! Issues installing CertBot
+  if [[ ${2} =~ [0-9]{1,4} && ${2} -ge 0 && ${2} -le 3600 ]]
   then
     max_timer=${2}
   else
@@ -73,7 +74,7 @@ check_pid_lock () {
       feedback error "Giving up waiting for ${1} to exit after ${sleep_count} of ${max_timer} seconds"
       break
     fi
-    if [ `ps aux | grep -v grep | grep ${1} | wc -l` -ge 1 ]
+    if [ `ps -ef | grep -v grep | grep ${1} | wc -l` -ge 1 ]
     then
       feedback body "...Waiting 2 seconds for ${1} to exit"
       sleep 2
@@ -81,7 +82,7 @@ check_pid_lock () {
     else
       feedback error "Deleting the PID file for ${1} because the process is not running"
       sleep 2
-      rm "/var/run/${1}.pid"
+      rm --force "/var/run/${1}.pid"
     fi
   done
 }
@@ -138,6 +139,11 @@ install_pkg () {
   if [ ${exit_code} -ne 0 ]
   then
     feedback error "Exit code ${exit_code} from yum"
+    feedback error 'Retrying after 60 seconds'
+    sleep 60
+    yum install -y ${1}
+    exit_code=${?}
+    feedback error "Exit code ${exit_code} from yum"
   fi
   check_pid_lock 'yum'
 }
@@ -167,7 +173,7 @@ feedback h1 'Collecting info from AWS Systems Manager Parameter Store'
 # Delete the AWS credentials file so that the AWS CLI uses the instances profile/role permissions
 if [ -f '/root/.aws/credentials' ]
 then
-  rm -f '/root/.aws/credentials'
+  rm --force '/root/.aws/credentials'
 fi
 # Default config for AWS CLI tools
 aws_region=`aws ssm get-parameter --name "${app_parameters}/awscli/aws_region" --query 'Parameter.Value' --output text --region ${aws_region}`
@@ -350,8 +356,8 @@ feedback h3 'Sleeping for 5 seconds to allow that DNS change to replicate'
 sleep 5
 
 # Install Let's Encrypt CertBot, requires EPEL
-sleep 90
 feedback h1 'Install Lets Encrypt CertBot'
+sleep 90               # !!
 cat /proc/meminfo      # !! Check if there is enough free memory?
 install_pkg 'certbot python2-certbot-apache'
 
