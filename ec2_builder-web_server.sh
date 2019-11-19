@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.14-20191119
+# Version:      0.7.15-20191119
 # File:         ec2_builder-web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -392,9 +392,9 @@ sleep 5
 
 # Install Let's Encrypt CertBot, requires EPEL
 feedback h1 'Install Lets Encrypt CertBot'
+install_pkg 'certbot'
 # !! Bug This is where installing certbot with yum gives exit code 137 and fails to install python2-certbot-apache. Or it can't allocate memory
-install_pkg 'certbot python2-certbot-apache'
-
+install_pkg 'python2-certbot-apache'
 # Create and install this instances certificates, these will be kept locally on EBS.  All vhost certificates need to be kept on EFS.
 feedback h2 'Get Lets Encrypt certificates for this server'
 mkdir --parents "${vhost_root}/_default_/log/${instance_id}.${hosting_domain}/letsencrypt"
