@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.22-20191119
+# Version:      0.7.23-20191119
 # File:         ec2_builder-web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -412,7 +412,7 @@ mv '/etc/httpd/conf.d/welcome.conf' '/etc/httpd/conf.d/welcome.conf.disable'
 # Create a config for the server on the EBS volume
 feedback h3 'Create a _default_ virtual host config on EBS specific to this instance'
 cp "${vhost_root}/_default_/conf/instance-specific-httpd.conf" /etc/httpd/conf.d/this-instance.conf
-sed -i "s|i-.*\.cakeit\.nz|${instance_id}.${hosting_domain}|g" /etc/httpd/conf.d/this-instance.conf
+sed -i "s|i-instanceid\.cakeit\.nz|${instance_id}.${hosting_domain}|g" /etc/httpd/conf.d/this-instance.conf
 # Include the vhost config on the EFS volume
 feedback h3 'Include the vhost config from the EFS volume'
 echo '# Publish the vhosts stored on the EFS volume' > /etc/httpd/conf.d/vhost.conf
