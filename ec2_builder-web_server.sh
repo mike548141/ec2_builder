@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.20-20191119
+# Version:      0.7.21-20191119
 # File:         ec2_builder-web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -67,10 +67,9 @@ check_pid_lock () {
     feedback error "check_pid_lock Invalid timer specified, using default of ${sleep_max_timer}"
   elif [[ ! -z ${2} && ${2} -ge 0 && ${2} -le 3600 ]]
   then
-    echo 'in range'
     sleep_max_timer=${2}
-  else
-    feedback error "check_pid_lock Timer outside of range, using default of ${sleep_max_timer}"
+  elif [[ ! -z ${2} ]]
+    feedback error "check_pid_lock Timer outside of 0-3600 range, using default of ${sleep_max_timer}"
   fi
   while [ -f "/var/run/${1}.pid" ]
   do
@@ -231,7 +230,7 @@ public_ipv4=`ec2-metadata --public-ipv4 | cut -c 14-`
 # Harden OpenSSH server
 feedback h1 'Harden the OpenSSH daemon'
 feedback h3 'Re-generate the RSA and ED25519 keys'
-rm --force '/etc/ssh/ssh_host_*'
+rm --force /etc/ssh/ssh_host_*
 ssh-keygen -t rsa -b 4096 -f '/etc/ssh/ssh_host_rsa_key' -N ""
 chown root:ssh_keys '/etc/ssh/ssh_host_rsa_key'
 chmod 0640 '/etc/ssh/ssh_host_rsa_key'
@@ -244,7 +243,8 @@ awk '$5 >= 3071' '/etc/ssh/moduli' > '/etc/ssh/moduli.safe'
 mv -f '/etc/ssh/moduli.safe' '/etc/ssh/moduli'
 feedback h3 'Disable the DSA and ECDSA host keys'
 cp '/etc/ssh/sshd_config' '/etc/ssh/sshd_config.bak'
-sed -i 's|^HostKey /etc/ssh/ssh_host_\(dsa\|ecdsa\)_key$|\#HostKey /etc/ssh/ssh_host_\1_key|g' '/etc/ssh/sshd_config'
+sed -i 's|^HostKey /etc/ssh/ssh_host_dsa_key$|#HostKey /etc/ssh/ssh_host_dsa_key|g' '/etc/ssh/sshd_config'
+sed -i 's|^HostKey /etc/ssh/ssh_host_ecdsa_key$|#HostKey /etc/ssh/ssh_host_ecdsa_key|g' '/etc/ssh/sshd_config'
 feedback h3 'Restrict supported key exchange, cipher, and MAC algorithms'
 echo '' >> '/etc/ssh/sshd_config'
 echo '# Restrict key exchange, cipher, and MAC algorithms' >> '/etc/ssh/sshd_config'
