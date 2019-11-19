@@ -143,15 +143,25 @@ install_pkg () {
   local exit_code=${?}
   if [ ${exit_code} -ne 0 ]
   then
-    feedback error "yum exit code ${exit_code}"
+    feedback error "yum install exit code ${exit_code}"
     feedback body 'Retrying install in 60 seconds'
     sleep 60
+    feedback h3 'Running yum-complete-transaction -y'
     yum-complete-transaction -y
-    feedback body "Exit code ${?} from yum-complete-transaction"
+    exit_code=${?}
+    feedback body "Exit code ${exit_code}"
+    feedback h3 'Running yum history redo last'
     yum history redo last
-    feedback body "Exit code ${?} from yum history redo last"
+    exit_code=${?}
+    feedback body "Exit code ${exit_code}"
+    feedback h3 'Running yum clean all'
+    yum clean all
+    exit_code=${?}
+    feedback body "Exit code ${exit_code}"
+    feedback h3 "Running yum install --assumeyes ${1}"
     yum install --assumeyes ${1}
-    feedback body "Exit code ${?} from yum install --assumeyes ${1}"
+    exit_code=${?}
+    feedback body "Exit code ${exit_code}"
   fi
   check_pid_lock 'yum'
 }
@@ -295,6 +305,7 @@ feedback h1 'Install AWS EFS helper'
 install_pkg 'amazon-efs-utils'
 feedback h3 'Mount the EFS volume for vhost data'
 mkdir --parents ${efs_mount_point}
+umount ${efs_mount_point}
 mount -t efs -o tls ${efs_volume}:/ ${efs_mount_point}
 feedback body 'Set it to auto mount at boot'
 echo "# Mount AWS EFS volume ${efs_volume} for the web root data" >> /etc/fstab
@@ -315,6 +326,7 @@ aws configure set region ${aws_region}
 aws configure set output ${aws_cli_output}
 feedback h3 'Mount the S3 bucket for static web data'
 mkdir --parents ${s3_mount_point}
+umount ${s3_mount_point}
 s3fs ${s3_bucket} ${s3_mount_point} -o allow_other -o use_path_request_style
 feedback body 'Set it to auto mount at boot'
 echo "# Mount AWS S3 bucket ${s3_bucket} for static web data" >> /etc/fstab
@@ -350,8 +362,9 @@ feedback h3 'Restart PHP-FPM to recognise the additional PHP modules and config'
 systemctl restart php-fpm
 
 # Install Ghost Script, a PostScript interpreter and renderer that is used by WordPress for PDFs
-feedback h1 'Install Ghost Script'
-install_pkg 'ghostscript'
+# Disabled as its being installed with PHP as a dependency
+#feedback h1 'Install Ghost Script'
+#install_pkg 'ghostscript'
 
 # Install Git to support content versioning in MediaWiki
 feedback h1 'Install Git'
@@ -368,7 +381,8 @@ install_pkg 'mariadb-server'
 feedback h3 'Sleep for 5 seconds as the database server wont start immediately after install'
 sleep 5
 feedback h3 'Start the database server and set it to auto start at boot'
-systemctl restart mariadb
+# !! Is this causing issues?
+#systemctl restart mariadb
 systemctl enable mariadb
 
 # Install the web server
