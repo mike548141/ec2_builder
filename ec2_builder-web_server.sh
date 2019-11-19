@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.11-20191119
+# Version:      0.7.13-20191119
 # File:         ec2_builder-web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -141,17 +141,19 @@ feedback () {
 # Install an app using yum
 install_pkg () {
   check_pid_lock 'yum'
-  yum install -y ${1}
+  yum install --assumeyes --quiet ${1}
   exit_code=${?}
   if [ ${exit_code} -ne 0 ]
   then
     feedback error "yum exit code ${exit_code}"
-    feedback body 'Retrying install in 90 seconds'
-    sleep 90
+    feedback body 'Retrying install in 60 seconds'
+    sleep 60
     yum-complete-transaction -y
     feedback body "Exit code ${?} from yum-complete-transaction"
     yum history redo last
     feedback body "Exit code ${?} from yum history redo last"
+    yum install --assumeyes ${1}
+    feedback body "Exit code ${?} from yum install --assumeyes ${1}"
   fi
   check_pid_lock 'yum'
 }
@@ -159,7 +161,7 @@ install_pkg () {
 # Wrap the amazon_linux_extras script with additional steps
 manage_ale () {
   amazon-linux-extras ${1} ${2}
-  yum clean metadata
+  yum clean --quiet metadata
 }
 
 #======================================
@@ -232,14 +234,15 @@ public_ipv4=`ec2-metadata --public-ipv4 | cut -c 14-`
 feedback h1 'Allocate the EIP public IP address to this instance'
 aws ec2 associate-address --instance-id ${instance_id} --allocation-id ${eip_allocation_id} --region ${aws_region}
 # Update the public IP address assigned now the EIP is associated
-feedback h3 'Sleep for 5 seconds to allow the EIP association to complete'
+feedback h3 'Sleep for 5 seconds to allow metadata to update after the EIP association'
 sleep 5
 public_ipv4=`ec2-metadata --public-ipv4 | cut -c 14-`
 feedback body "EIP address ${public_ipv4} associated"
 
 # Update the software stack
 feedback h1 'Update the software stack'
-yum update -y
+yum update --assumeyes --quiet
+systemctl daemon-reload
 
 # Add access to Extra Packages for Enterprise Linux (EPEL) from the Fedora project
 feedback h1 'Add access to Extra Packages for Enterprise Linux (EPEL) from the Fedora project'

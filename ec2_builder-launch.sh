@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.0.6-20191113
+# Version:      0.1.0-20191113
 # File:         ec2_builder-launch.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -25,6 +25,7 @@
 #======================================
 # Define the functions
 #--------------------------------------
+# Beautifies the feedback to the user/log file on std_out
 feedback () {
   if [ "${1}" == "title" ]
   then
@@ -70,14 +71,17 @@ feedback () {
 }
 
 #======================================
-# Declare the constants
+# Say hello
 #--------------------------------------
 script_ver=`grep '^# Version:[ \t]*' ${0} | sed 's|# Version:[ \t]*||'`
-feedback title "Build script started"
+feedback title "Launch script started"
 feedback body "Script: ${0}"
 feedback body "Version: ${script_ver}"
 feedback body "Started: `date`"
 
+#======================================
+# Declare the constants
+#--------------------------------------
 feedback h3 'Setting the initial constants'
 # Define the keys constants to decide what we are building
 tenancy='cakeIT'
