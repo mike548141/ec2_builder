@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.21-20191119
+# Version:      0.7.22-20191119
 # File:         ec2_builder-web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -69,6 +69,7 @@ check_pid_lock () {
   then
     sleep_max_timer=${2}
   elif [[ ! -z ${2} ]]
+  then
     feedback error "check_pid_lock Timer outside of 0-3600 range, using default of ${sleep_max_timer}"
   fi
   while [ -f "/var/run/${1}.pid" ]
