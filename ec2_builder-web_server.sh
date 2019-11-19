@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.15-20191119
+# Version:      0.7.16-20191119
 # File:         ec2_builder-web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -60,35 +60,31 @@
 #--------------------------------------
 # Checks if the app is running, and waits for it to exit cleanly
 check_pid_lock () {
-  sleep_count=0
+  local sleep_timer=0
+  local sleep_max_timer=90
   if [[ ${2} =~ [^0-9] ]]
   then
-    feedback error 'check_pid_lock Invalid timer specified, using default of 90'
-    sleep_max_count=90
-  elif [[ ${2} -ge 0 && ${2} -le 3600 ]]
+    feedback error "check_pid_lock Invalid timer specified, using default of ${sleep_max_timer}"
+  elif [[ ! -z ${2} && ${2} -ge 0 && ${2} -le 3600 ]]
   then
-    sleep_max_count=${2}
-  else
-    sleep_max_count=90
+    sleep_max_timer=${2}
   fi
   while [ -f "/var/run/${1}.pid" ]
   do
-    if [[ ${sleep_count} -ge ${sleep_max_count} ]]
+    if [[ ${sleep_timer} -ge ${sleep_max_timer} ]]
     then
-      # !!Bug  '*** Error: Giving up waiting for yum to exit after 0 of  seconds'. sleep_max_count is going to null for some reason
-      feedback error "Giving up waiting for ${1} to exit after ${sleep_count} of ${sleep_max_count} seconds"
+      feedback error "Giving up waiting for ${1} to exit after ${sleep_timer} of ${sleep_max_timer} seconds"
       break
-    fi
-    if [ `ps -ef | grep -v grep | grep ${1} | wc -l` -ge 1 ]
+    elif [ `ps -ef | grep -v grep | grep ${1} | wc -l` -ge 1 ]
     then
-      feedback body "...Waiting 2 seconds for ${1} to exit"
-      sleep 2
-      sleep_count=$(( ${sleep_count} + 2 ))
+      feedback body "Waiting for ${1} to exit"
+      sleep 1
+      sleep_timer=$(( ${sleep_timer} + 1 ))
     else
       feedback error "Deleting the PID file for ${1} because the process is not running"
-      sleep 2
       # !! Bug I'm not sure this is safe and may cause issues
       #rm --force "/var/run/${1}.pid"
+      break
     fi
   done
 }
@@ -142,7 +138,7 @@ feedback () {
 install_pkg () {
   check_pid_lock 'yum'
   yum install --assumeyes ${1}
-  exit_code=${?}
+  local exit_code=${?}
   if [ ${exit_code} -ne 0 ]
   then
     feedback error "yum exit code ${exit_code}"
@@ -272,8 +268,8 @@ feedback h3 'Mount the EFS volume for vhost data'
 mkdir --parents ${efs_mount_point}
 mount -t efs -o tls ${efs_volume}:/ ${efs_mount_point}
 feedback body 'Set it to auto mount at boot'
-echo "# Mount AWS EFS volume ${efs_volume} for the web root data">> /etc/fstab
-echo "${efs_volume}:/ ${efs_mount_point} efs tls,_netdev 0 0">> /etc/fstab
+echo "# Mount AWS EFS volume ${efs_volume} for the web root data" >> /etc/fstab
+echo "${efs_volume}:/ ${efs_mount_point} efs tls,_netdev 0 0" >> /etc/fstab
 # Create a directory for this instances log files on the EFS volume
 feedback h2 'Create a space for this instances log files on the EFS volume'
 mkdir --parents "${vhost_root}/_default_/log/${instance_id}.${hosting_domain}"
@@ -292,8 +288,8 @@ feedback h3 'Mount the S3 bucket for static web data'
 mkdir --parents ${s3_mount_point}
 s3fs ${s3_bucket} ${s3_mount_point} -o allow_other -o use_path_request_style
 feedback body 'Set it to auto mount at boot'
-echo "# Mount AWS S3 bucket ${s3_bucket} for static web data">> /etc/fstab
-echo "s3fs#${s3_bucket} ${s3_mount_point} fuse _netdev,allow_other,use_path_request_style 0 0">> /etc/fstab
+echo "# Mount AWS S3 bucket ${s3_bucket} for static web data" >> /etc/fstab
+echo "s3fs#${s3_bucket} ${s3_mount_point} fuse _netdev,allow_other,use_path_request_style 0 0" >> /etc/fstab
 
 # Install scripting languages
 feedback h1 'Install scripting languages'
@@ -319,8 +315,8 @@ cp "${vhost_root}/_default_/conf/instance-specific-php-fpm.conf" /etc/php-fpm.d/
 sed -i "s|i-.*\.cakeit\.nz|${instance_id}.${hosting_domain}|g" /etc/php-fpm.d/this-instance.conf
 # Include the vhost config on the EFS volume
 feedback h3 'Include the vhost config on the EFS volume'
-echo '; Include the vhosts stored on the EFS volume'> /etc/php-fpm.d/vhost.conf
-echo "include=${vhost_root}/vhosts-php-fpm.conf">> /etc/php-fpm.d/vhost.conf
+echo '; Include the vhosts stored on the EFS volume' > /etc/php-fpm.d/vhost.conf
+echo "include=${vhost_root}/vhosts-php-fpm.conf" >> /etc/php-fpm.d/vhost.conf
 feedback h3 'Restart PHP-FPM to recognise the additional PHP modules and config'
 systemctl restart php-fpm
 
@@ -376,8 +372,8 @@ cp "${vhost_root}/_default_/conf/instance-specific-httpd.conf" /etc/httpd/conf.d
 sed -i "s|i-.*\.cakeit\.nz|${instance_id}.${hosting_domain}|g" /etc/httpd/conf.d/this-instance.conf
 # Include the vhost config on the EFS volume
 feedback h3 'Include the vhost config from the EFS volume'
-echo '# Publish the vhosts stored on the EFS volume'> /etc/httpd/conf.d/vhost.conf
-echo "Include ${vhost_root}/vhosts-httpd.conf">> /etc/httpd/conf.d/vhost.conf
+echo '# Publish the vhosts stored on the EFS volume' > /etc/httpd/conf.d/vhost.conf
+echo "Include ${vhost_root}/vhosts-httpd.conf" >> /etc/httpd/conf.d/vhost.conf
 feedback h3 'Restart the web server'
 systemctl restart httpd
 
@@ -424,9 +420,9 @@ do
 done
 # Add a job to cron to run certbot regularly for renewals and revocations
 feedback h3 'Add a job to cron to run certbot daily'
-echo '#!/usr/bin/env bash'> /etc/cron.daily/certbot
-echo '# Run Lets Encrypt Certbot to revoke and/or renew certiicates'>> /etc/cron.daily/certbot
-echo 'certbot renew --no-self-upgrade'>> /etc/cron.daily/certbot
+echo '#!/usr/bin/env bash' > /etc/cron.daily/certbot
+echo '# Run Lets Encrypt Certbot to revoke and/or renew certiicates' >> /etc/cron.daily/certbot
+echo 'certbot renew --no-self-upgrade' >> /etc/cron.daily/certbot
 chmod 0700 /etc/cron.daily/certbot
 systemctl restart crond
 
