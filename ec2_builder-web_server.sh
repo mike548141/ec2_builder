@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.8-20191119
+# Version:      0.7.11-20191119
 # File:         ec2_builder-web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -17,8 +17,8 @@
 # Updates:
 #
 # Improvements to be made:
-#   Action: Ensure that when Lets Encrypt renews a vhosts certificate that it stores the latest versions on EFS with the vhost, not on EBS
 #   Action: Need a shared user directory for PAM/users. So that file ownership on EFS is the same on all instances
+#   Action: Ensure that when Lets Encrypt renews a vhosts certificate that it stores the latest versions on EFS with the vhost, not on EBS
 #   Action: Configure a local DB, Aurora Serverless resume is too slow (~25s)
 #   Action: Keep all temporal data with vhost e.g. php session and cache data. And configure PHP security features like chroot
 #   Action: Import my confluence download and any other info into the wiki
@@ -58,23 +58,25 @@
 #======================================
 # Declare the libraries and functions
 #--------------------------------------
+# Checks if the app is running, and waits for it to exit cleanly
 check_pid_lock () {
   sleep_count=0
   if [[ ${2} =~ [^0-9] ]]
   then
     feedback error 'check_pid_lock Invalid timer specified, using default of 90'
-    max_timer=90
+    sleep_max_count=90
   elif [[ ${2} -ge 0 && ${2} -le 3600 ]]
   then
-    max_timer=${2}
+    sleep_max_count=${2}
   else
-    max_timer=90
+    sleep_max_count=90
   fi
   while [ -f "/var/run/${1}.pid" ]
   do
-    if [[ ${sleep_count} -ge ${max_timer} ]]
+    if [[ ${sleep_count} -ge ${sleep_max_count} ]]
     then
-      feedback error "Giving up waiting for ${1} to exit after ${sleep_count} of ${max_timer} seconds"
+      # !!Bug  '*** Error: Giving up waiting for yum to exit after 0 of  seconds'. sleep_max_count is going to null for some reason
+      feedback error "Giving up waiting for ${1} to exit after ${sleep_count} of ${sleep_max_count} seconds"
       break
     fi
     if [ `ps -ef | grep -v grep | grep ${1} | wc -l` -ge 1 ]
@@ -85,11 +87,13 @@ check_pid_lock () {
     else
       feedback error "Deleting the PID file for ${1} because the process is not running"
       sleep 2
-      rm --force "/var/run/${1}.pid"
+      # !! Bug I'm not sure this is safe and may cause issues
+      #rm --force "/var/run/${1}.pid"
     fi
   done
 }
 
+# Beautifies the feedback to the user/log file on std_out
 feedback () {
   if [ "${1}" == "title" ]
   then
@@ -134,6 +138,7 @@ feedback () {
   fi
 }
 
+# Install an app using yum
 install_pkg () {
   check_pid_lock 'yum'
   yum install -y ${1}
@@ -151,8 +156,14 @@ install_pkg () {
   check_pid_lock 'yum'
 }
 
+# Wrap the amazon_linux_extras script with additional steps
+manage_ale () {
+  amazon-linux-extras ${1} ${2}
+  yum clean metadata
+}
+
 #======================================
-# Declare the constants
+# Say hello
 #--------------------------------------
 script_ver=`grep '^# Version:[ \t]*' ${0} | sed 's|# Version:[ \t]*||'`
 feedback title "Build script started"
@@ -160,7 +171,10 @@ feedback body "Script: ${0}"
 feedback body "Version: ${script_ver}"
 feedback body "Started: `date`"
 
-# Define the keys constants to decide what we are building
+#======================================
+# Declare the constants
+#--------------------------------------
+# Define the key constants to decide what we are building
 tenancy='cakeIT'
 resource_environment='prod'
 service_group='web.cakeit.nz'
@@ -169,7 +183,8 @@ app='ec2_builder-web_server.sh'
 # Define the parameter store structure
 common_parameters="/${tenancy}/${resource_environment}/common"
 app_parameters="/${tenancy}/${resource_environment}/${service_group}/${app}"
-# The initial AWS region setting using the instances placement so that we can connect to the AWS SSM parameter store
+
+# Set the initial AWS region setting using the instances placement so that we can connect to the AWS SSM parameter store
 aws_region=`ec2-metadata --availability-zone | cut -c 12-20`
 # Get the instance name
 instance_id=`ec2-metadata --instance-id | cut -c 14-`
@@ -207,7 +222,7 @@ eip_allocation_id=`aws ssm get-parameter --name "${app_parameters}/eip_allocatio
 #======================================
 # Set the initial values for the variables
 #--------------------------------------
-# Gather instance specific information
+# Gather variable instance specific information
 public_ipv4=`ec2-metadata --public-ipv4 | cut -c 14-`
 
 #======================================
@@ -216,24 +231,31 @@ public_ipv4=`ec2-metadata --public-ipv4 | cut -c 14-`
 # Allocate the EIP to this instance
 feedback h1 'Allocate the EIP public IP address to this instance'
 aws ec2 associate-address --instance-id ${instance_id} --allocation-id ${eip_allocation_id} --region ${aws_region}
-# !! Disabled as its still showing the old IP address at this stage, not sure how long until ec2-metadata updates after the EIP is associated. Command now occurs just before Cloudflare is called
-#public_ipv4=`ec2-metadata --public-ipv4 | cut -c 14-`
+# Update the public IP address assigned now the EIP is associated
+feedback h3 'Sleep for 5 seconds to allow the EIP association to complete'
+sleep 5
+public_ipv4=`ec2-metadata --public-ipv4 | cut -c 14-`
+feedback body "EIP address ${public_ipv4} associated"
 
 # Update the software stack
 feedback h1 'Update the software stack'
 yum update -y
 
-# Install the management agents
-feedback h1 'Install the management agents'
-feedback body 'AWS Systems Manager is installed by default, nothing left to do'
-# !! Disabled as not required yet/at all
-#amazon-linux-extras install -y ansible2 rust1
-#install_pkg 'chef puppet'
-
 # Add access to Extra Packages for Enterprise Linux (EPEL) from the Fedora project
 feedback h1 'Add access to Extra Packages for Enterprise Linux (EPEL) from the Fedora project'
-amazon-linux-extras install -y epel
-# !! check_pid_lock 'amazon-linux-extras'
+manage_ale enable 'epel'
+install_pkg 'epel-release'
+
+# Install the management agents
+feedback h1 'Install the management agents'
+install_pkg 'amazon-ssm-agent'
+# Disabled as these packages are not required yet/at all
+#manage_ale enable 'ansible2'
+#install_pkg 'ansible'
+#manage_ale enable 'rust1'
+#install_pkg 'rust cargo'
+#install_pkg 'chef'
+#install_pkg 'puppet'
 
 # Install security apps, requires EPEL
 feedback h1 'Install host security apps'
@@ -271,21 +293,25 @@ echo "# Mount AWS S3 bucket ${s3_bucket} for static web data">> /etc/fstab
 echo "s3fs#${s3_bucket} ${s3_mount_point} fuse _netdev,allow_other,use_path_request_style 0 0">> /etc/fstab
 
 # Install scripting languages
-# Go & Ruby
 feedback h1 'Install scripting languages'
-feedback h2 'Install Go & Ruby'
-install_pkg 'golang ruby'
 # Python
 feedback h2 'Install Python'
 install_pkg 'python python3'
+# Go
+feedback h2 'Install Go'
+install_pkg 'golang'
+# Ruby
+feedback h2 'Install Ruby'
+install_pkg 'ruby'
 # PHP
-feedback h2 'Install PHP 7.3 and some additional PHP modules'
-amazon-linux-extras install -y php7.3
-install_pkg 'php-bcmath php-gd php-intl php-mbstring php-pecl-apcu php-pecl-imagick php-pecl-libsodium php-pecl-zip php-xml'
-
+feedback h2 'Install PHP'
+manage_ale enable 'php7.3'
+install_pkg 'php-cli php-pdo php-fpm php-json php-mysqlnd php-common'
 # Customise the PHP config
+feedback h3 'Install additional PHP modules'
+install_pkg 'php-bcmath php-gd php-intl php-mbstring php-pecl-apcu php-pecl-imagick php-pecl-libsodium php-pecl-zip php-xml'
 # Create a PHP config for the _default_ vhost
-feedback h3 'Create a PHP-FPM config for the _default_ vhost specific to this instance and store it on EBS'
+feedback h3 'Create a PHP-FPM config on EBS for this instances _default_ vhost'
 cp "${vhost_root}/_default_/conf/instance-specific-php-fpm.conf" /etc/php-fpm.d/this-instance.conf
 sed -i "s|i-.*\.cakeit\.nz|${instance_id}.${hosting_domain}|g" /etc/php-fpm.d/this-instance.conf
 # Include the vhost config on the EFS volume
@@ -308,6 +334,7 @@ feedback h1 'Install the MariaDB client'
 install_pkg 'mariadb'
 
 # Install MariaDB server to host databases as Aurora Serverless resume is too slow (~25s)
+# This section will only be used for standalone installs. Eventually this will either use a dedicated EC2 running MariaDB or AWS RDS Aurora
 feedback h1 'Install the MariaDB server'
 install_pkg 'mariadb-server'
 feedback h3 'Sleep for 5 seconds as the database server wont start immediately after install'
@@ -316,9 +343,9 @@ feedback h3 'Start the database server and set it to auto start at boot'
 systemctl restart mariadb
 systemctl enable mariadb
 
-# Install the web server - https://mozilla.github.io/server-side-tls/ssl-config-generator/
+# Install the web server
 feedback h1 'Install the web server'
-amazon-linux-extras install -y httpd_modules
+manage_ale enable 'httpd_modules'
 install_pkg 'httpd mod_ssl'
 feedback h3 'Start the web server and set it to auto start at boot'
 systemctl restart httpd
@@ -341,11 +368,11 @@ mv '/etc/httpd/conf.d/ssl.conf' '/etc/httpd/conf.d/ssl.conf.disable'
 feedback h3 'Disable the welcome page config'
 mv '/etc/httpd/conf.d/welcome.conf' '/etc/httpd/conf.d/welcome.conf.disable'
 # Create a config for the server on the EBS volume
-feedback h3 'Create a _default_ virtual host config specific to this instance and store it on EBS'
+feedback h3 'Create a _default_ virtual host config on EBS specific to this instance'
 cp "${vhost_root}/_default_/conf/instance-specific-httpd.conf" /etc/httpd/conf.d/this-instance.conf
 sed -i "s|i-.*\.cakeit\.nz|${instance_id}.${hosting_domain}|g" /etc/httpd/conf.d/this-instance.conf
 # Include the vhost config on the EFS volume
-feedback h3 'Include the vhost config on the EFS volume'
+feedback h3 'Include the vhost config from the EFS volume'
 echo '# Publish the vhosts stored on the EFS volume'> /etc/httpd/conf.d/vhost.conf
 echo "Include ${vhost_root}/vhosts-httpd.conf">> /etc/httpd/conf.d/vhost.conf
 feedback h3 'Restart the web server'
@@ -353,8 +380,6 @@ systemctl restart httpd
 
 # Create a DNS entry for the web host
 feedback h1 'Create DNS entry on Cloudflare'
-# Update the public IP address before creating the DNS record, ec2-metadata should have recognised the EIP association by now
-public_ipv4=`ec2-metadata --public-ipv4 | cut -c 14-`
 curl -X POST "https://api.cloudflare.com/client/v4/zones/${cloudflare_zoneid}/dns_records" \
      -H "Authorization: Bearer ${cloudflare_api_token}" \
      -H "Content-Type: application/json" \
@@ -364,6 +389,7 @@ sleep 5
 
 # Install Let's Encrypt CertBot, requires EPEL
 feedback h1 'Install Lets Encrypt CertBot'
+# !! Bug This is where installing certbot with yum gives exit code 137 and fails to install python2-certbot-apache
 install_pkg 'certbot python2-certbot-apache'
 
 # Create and install this instances certificates, these will be kept locally on EBS.  All vhost certificates need to be kept on EFS.
@@ -394,7 +420,7 @@ do
   fi
 done
 # Add a job to cron to run certbot regularly for renewals and revocations
-feedback h3 'Add a job to cron to run certbot regularly'
+feedback h3 'Add a job to cron to run certbot daily'
 echo '#!/usr/bin/env bash'> /etc/cron.daily/certbot
 echo '# Run Lets Encrypt Certbot to revoke and/or renew certiicates'>> /etc/cron.daily/certbot
 echo 'certbot renew --no-self-upgrade'>> /etc/cron.daily/certbot
