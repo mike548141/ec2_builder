@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.16-20191119
+# Version:      0.7.20-20191119
 # File:         ec2_builder-web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -67,7 +67,10 @@ check_pid_lock () {
     feedback error "check_pid_lock Invalid timer specified, using default of ${sleep_max_timer}"
   elif [[ ! -z ${2} && ${2} -ge 0 && ${2} -le 3600 ]]
   then
+    echo 'in range'
     sleep_max_timer=${2}
+  else
+    feedback error "check_pid_lock Timer outside of range, using default of ${sleep_max_timer}"
   fi
   while [ -f "/var/run/${1}.pid" ]
   do
@@ -82,8 +85,7 @@ check_pid_lock () {
       sleep_timer=$(( ${sleep_timer} + 1 ))
     else
       feedback error "Deleting the PID file for ${1} because the process is not running"
-      # !! Bug I'm not sure this is safe and may cause issues
-      #rm --force "/var/run/${1}.pid"
+      rm --force "/var/run/${1}.pid"
       break
     fi
   done
@@ -226,6 +228,32 @@ public_ipv4=`ec2-metadata --public-ipv4 | cut -c 14-`
 #======================================
 # Lets get into it
 #--------------------------------------
+# Harden OpenSSH server
+feedback h1 'Harden the OpenSSH daemon'
+feedback h3 'Re-generate the RSA and ED25519 keys'
+rm --force '/etc/ssh/ssh_host_*'
+ssh-keygen -t rsa -b 4096 -f '/etc/ssh/ssh_host_rsa_key' -N ""
+chown root:ssh_keys '/etc/ssh/ssh_host_rsa_key'
+chmod 0640 '/etc/ssh/ssh_host_rsa_key'
+ssh-keygen -t ed25519 -f '/etc/ssh/ssh_host_ed25519_key' -N ""
+chown root:ssh_keys '/etc/ssh/ssh_host_ed25519_key'
+chmod 0640 '/etc/ssh/ssh_host_ed25519_key'
+feedback h3 'Remove small Diffie-Hellman moduli'
+cp '/etc/ssh/moduli' '/etc/ssh/moduli.bak'
+awk '$5 >= 3071' '/etc/ssh/moduli' > '/etc/ssh/moduli.safe'
+mv -f '/etc/ssh/moduli.safe' '/etc/ssh/moduli'
+feedback h3 'Disable the DSA and ECDSA host keys'
+cp '/etc/ssh/sshd_config' '/etc/ssh/sshd_config.bak'
+sed -i 's|^HostKey /etc/ssh/ssh_host_\(dsa\|ecdsa\)_key$|\#HostKey /etc/ssh/ssh_host_\1_key|g' '/etc/ssh/sshd_config'
+feedback h3 'Restrict supported key exchange, cipher, and MAC algorithms'
+echo '' >> '/etc/ssh/sshd_config'
+echo '# Restrict key exchange, cipher, and MAC algorithms' >> '/etc/ssh/sshd_config'
+echo 'KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group18-sha512,diffie-hellman-group16-sha512,diffie-hellman-group-exchange-sha256' >> '/etc/ssh/sshd_config'
+echo 'Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr' >> '/etc/ssh/sshd_config'
+echo 'MACs hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com,umac-128-etm@openssh.com' >> '/etc/ssh/sshd_config'
+feedback h3 'Restart OpenSSH server'
+systemctl restart sshd
+
 # Allocate the EIP to this instance
 feedback h1 'Allocate the EIP public IP address to this instance'
 aws ec2 associate-address --instance-id ${instance_id} --allocation-id ${eip_allocation_id} --region ${aws_region}
@@ -388,9 +416,8 @@ sleep 5
 
 # Install Let's Encrypt CertBot, requires EPEL
 feedback h1 'Install Lets Encrypt CertBot'
-install_pkg 'certbot'
 # !! Bug This is where installing certbot with yum gives exit code 137 and fails to install python2-certbot-apache. Or it can't allocate memory
-install_pkg 'python2-certbot-apache'
+install_pkg 'certbot python2-certbot-apache'
 # Create and install this instances certificates, these will be kept locally on EBS.  All vhost certificates need to be kept on EFS.
 feedback h2 'Get Lets Encrypt certificates for this server'
 mkdir --parents "${vhost_root}/_default_/log/${instance_id}.${hosting_domain}/letsencrypt"
@@ -421,9 +448,11 @@ done
 # Add a job to cron to run certbot regularly for renewals and revocations
 feedback h3 'Add a job to cron to run certbot daily'
 echo '#!/usr/bin/env bash' > /etc/cron.daily/certbot
+echo '# Update this instances configuration including what certificates need to be renewed' >> /etc/cron.daily/certbot
+echo "${vhost_root}/scripts/update_instance-vhosts_pki.sh" >> /etc/cron.daily/certbot
 echo '# Run Lets Encrypt Certbot to revoke and/or renew certiicates' >> /etc/cron.daily/certbot
 echo 'certbot renew --no-self-upgrade' >> /etc/cron.daily/certbot
-chmod 0700 /etc/cron.daily/certbot
+chmod 0770 /etc/cron.daily/certbot
 systemctl restart crond
 
 # Thats all I wrote
