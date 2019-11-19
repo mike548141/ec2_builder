@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.13-20191119
+# Version:      0.7.14-20191119
 # File:         ec2_builder-web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -141,7 +141,7 @@ feedback () {
 # Install an app using yum
 install_pkg () {
   check_pid_lock 'yum'
-  yum install --assumeyes --quiet ${1}
+  yum install --assumeyes ${1}
   exit_code=${?}
   if [ ${exit_code} -ne 0 ]
   then
@@ -161,7 +161,7 @@ install_pkg () {
 # Wrap the amazon_linux_extras script with additional steps
 manage_ale () {
   amazon-linux-extras ${1} ${2}
-  yum clean --quiet metadata
+  yum clean metadata
 }
 
 #======================================
@@ -241,7 +241,7 @@ feedback body "EIP address ${public_ipv4} associated"
 
 # Update the software stack
 feedback h1 'Update the software stack'
-yum update --assumeyes --quiet
+yum update --assumeyes
 systemctl daemon-reload
 
 # Add access to Extra Packages for Enterprise Linux (EPEL) from the Fedora project
@@ -392,7 +392,7 @@ sleep 5
 
 # Install Let's Encrypt CertBot, requires EPEL
 feedback h1 'Install Lets Encrypt CertBot'
-# !! Bug This is where installing certbot with yum gives exit code 137 and fails to install python2-certbot-apache
+# !! Bug This is where installing certbot with yum gives exit code 137 and fails to install python2-certbot-apache. Or it can't allocate memory
 install_pkg 'certbot python2-certbot-apache'
 
 # Create and install this instances certificates, these will be kept locally on EBS.  All vhost certificates need to be kept on EFS.
