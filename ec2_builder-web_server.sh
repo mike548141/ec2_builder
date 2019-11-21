@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.23-20191119
+# Version:      0.7.27-20191122
 # File:         ec2_builder-web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
+# Source:       https://github.com/mike548141/ec2_builder
 #
 # Description:
-#   Produces a cakeIT web server, developed on an Amazon Linux 2 AMI.
+#   Produces a cakeIT web server, developed on an Amazon Linux 2 AMI using a t3a.nano instance.
 #
 # References:
 #
@@ -17,10 +18,15 @@
 # Updates:
 #
 # Improvements to be made:
+#   Action: Use 'source /mnt/efs/script/common_variables.sh' after mounting the EFS so that the code in that script (e.g. setting vhost_list) is not duplicated in this script
+#     - If I do then the IAM user will need rights to the parameter store.
+#     - All constants (static) in common_variables should be moved to AWS Parameter store e.g. vhost_httpd_conf. Dynamic ones (e.g. vhost_list) would remain in the common_variables script
+#     - Some of the AWS CLI calls to the parameter store in this script should be moved to the common_variables script to stop duplication of code, but some will have to be duplicated still e.g. efs_mount_point
 #   Action: Need a shared user directory for PAM/users. So that file ownership on EFS is the same on all instances
+#   Action: Require a parameter for this script to go, otherwise exist with an error message. Protect against people running it again unknowningly
+#   Action: Keep all temporal data with vhost e.g. php session and cache data. And configure PHP security features like chroot
 #   Action: Ensure that when Lets Encrypt renews a vhosts certificate that it stores the latest versions on EFS with the vhost, not on EBS
 #   Action: Configure a local DB, Aurora Serverless resume is too slow (~25s)
-#   Action: Keep all temporal data with vhost e.g. php session and cache data. And configure PHP security features like chroot
 #   Action: Import my confluence download and any other info into the wiki
 #   Action: Add support to run both PHP 5 and 7
 #     - https://stackoverflow.com/questions/42696856/running-two-php-versions-on-the-same-server
@@ -40,15 +46,13 @@
 #   Action: Upgrade to load balancing the web serving work across 2 or more instances
 #   Action: Upgrade to multi-AZ, or even multi-region for all components.
 #   Action: Move to a multi-account structure using AWS Organisations. Use AWS CloudFormer to define all the resources in a template.
+#   Action: Create CloudFormation templates for all the AWS resources so that the entire setup can be created fresh in new AWS accounts
 #   Action: Is there a way to make the AWS AMI (Amazon Linux 2) as read only base, and all writes from this script, users logging in, or system use (e.g. logging) are written to a 2nd EBS volume?
 #
 #   Action: Get all S3 data into right storage tier. Files smaller than ?128KB? on S3IA or S3. Data larger than that in Deep Archive. Check inventory files.
 #
 #   Question: Can I shrink the EBS volume, its 8 GB but using 2.3GB
 #   Question: Launch instance has a mount EFS volume option, is this better than what I have scripted? Can't find option in launch template
-#
-# useradd competitive_edge --home-dir /mnt/efs/vhost/cakeit.nz
-# chown -R competitive_edge:apache /mnt/efs/vhost/cakeit.nz
 #
 
 #======================================
@@ -265,11 +269,11 @@ echo 'MACs hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com,umac-128-
 feedback h3 'Restart OpenSSH server'
 systemctl restart sshd
 
-# Allocate the EIP to this instance
+# Allocate the AWS EIP to this instance
 feedback h1 'Allocate the EIP public IP address to this instance'
 aws ec2 associate-address --instance-id ${instance_id} --allocation-id ${eip_allocation_id} --region ${aws_region}
 # Update the public IP address assigned now the EIP is associated
-feedback h3 'Sleep for 5 seconds to allow metadata to update after the EIP association'
+feedback body 'Sleep for 5 seconds to allow metadata to update after the EIP association'
 sleep 5
 public_ipv4=`ec2-metadata --public-ipv4 | cut -c 14-`
 feedback body "EIP address ${public_ipv4} associated"
@@ -294,6 +298,7 @@ install_pkg 'amazon-ssm-agent'
 #install_pkg 'rust cargo'
 #install_pkg 'chef'
 #install_pkg 'puppet'
+#install_pkg 'salt'
 
 # Install security apps, requires EPEL
 feedback h1 'Install host security apps'
@@ -305,14 +310,82 @@ feedback h1 'Install AWS EFS helper'
 install_pkg 'amazon-efs-utils'
 feedback h3 'Mount the EFS volume for vhost data'
 mkdir --parents ${efs_mount_point}
-umount ${efs_mount_point}
+if mountpoint -q ${efs_mount_point}
+then
+  umount ${efs_mount_point}
+fi
 mount -t efs -o tls ${efs_volume}:/ ${efs_mount_point}
 feedback body 'Set it to auto mount at boot'
 echo "# Mount AWS EFS volume ${efs_volume} for the web root data" >> /etc/fstab
 echo "${efs_volume}:/ ${efs_mount_point} efs tls,_netdev 0 0" >> /etc/fstab
+
+# Import the common constants and variables held in a script on the EFS volume. This saves duplicating code between scripts
+feedback h1 'Import the common constants and variables'
+source "${efs_mount_point}/script/common_variables.sh"
+# !! Where common_variables provides better variables swap the code in this script to use them e.g. ${vhost_httpd_conf} instead of ${efs_mount_point}/conf/vhosts-httpd.conf
+
 # Create a directory for this instances log files on the EFS volume
-feedback h2 'Create a space for this instances log files on the EFS volume'
+feedback h1 'Create a space for this instances log files on the EFS volume'
 mkdir --parents "${vhost_root}/_default_/log/${instance_id}.${hosting_domain}"
+
+# Create users and groups
+# The OS and base AMI packages use 0-1000 for the UID's and GID's they require. I have reserved 1001-2000 for UID's and GID's that are intrinsic to the build. UID & GID 2001 and above are for general use.
+# !! As this will need to run hourly, should I just call on a script from the efs/script folder and avoid code duplication?
+feedback h1 'Configure local users and groups to match those on EFS'
+# Groups
+feedback h3 'Create groups'
+groupadd --gid 1001 vhost_all
+groupadd --gid 1002 vhost_owners
+groupadd --gid 1003 vhost_users
+# Users
+feedback h3 'Create users'
+for vhost_dir in ${vhost_dir_list}
+do
+  if [ "${vhost_dir}" == "_default_" ] || [ "${vhost_dir}" == "example.com" ]
+  then
+    # These vhost directories don't need vhost users created
+    feedback body "Skipping ${vhost_dir}"
+  else
+    # Create the owner accounts, no one logs in as an owner account they are just to own the data for the vhost
+    vhost_dir_uid=`stat -c '%u' "${vhost_root}/${vhost_dir}"`
+    feedback body "Creating user ${vhost_dir} with UID ${vhost_dir_uid}"
+    useradd "${vhost_dir}" --uid ${vhost_dir_uid} --home-dir "${vhost_root}/${vhost_dir}" --groups vhost_owners,vhost_all
+    # Create the end user accounts, these user accounts are used to login (e.g. using SSH) to manage a vhsot and will generally represent a real person.
+    # !! Get the list of end users from the PKI/SSH keys in vhost/pki
+    # !! Not sure if I should/need to specify the UID for end users or leave it to fate
+    # !! End users will need to be a member of the vhost's owner group e.g. mike would be a member of cakeit.nz... A user should be able to be a member of many vhosts with one user ID
+    #useradd "${end_user}" --uid ${end_user_uid} --home-dir "${vhost_root}/${vhost_dir}" --groups vhost_users,vhost_all,${vhost_dir}
+  fi
+done
+# !! Create cron job in cron.hourly to add/delete users as required
+# !! Extend script to delete or disable existing users?  Maybe disable all users in vhost_users and then re-enable if directory still exists?
+# !! Do I even need to disable as no password? Depend on user ID & SSH/PKI token?
+# !! Ideally this would use IAM users to support MFA and a user ID that could tie to other services e.g. a S3 bucket dedicated to a IAM user
+
+# !! Do I need to create the users primary group before creating the user e.g. groupadd --gid 2001 competitiveedge.nz; useradd --uid 2001 --gid 2001 competitiveedge.nz
+
+# Sync GID of my generic groups and the GID of the vhost owners
+# owners never login. Exist only to own the files and folders for the vhost
+# users is for end users only that actually login. Remove the owners currently in the build script
+# create a Vhost_all group that includes users and owners
+
+
+# !! Delete this section once complete in SSH
+#for vhost_dir in ${vhost_dir_list}
+#do
+#  if [ "${vhost_dir}" == "_default_" ] || [ "${vhost_dir}" == "example.com" ]
+#  then
+#    # System folders that don't need vhost users created
+#    echo "Skipping ${vhost_dir}"
+#  else
+#    vhost_dir_uid=`stat -c '%u' "${vhost_root}/${vhost_dir}"`
+#    echo "Setting owner of ${vhost_dir} to UID & GID of ${vhost_dir_uid}"
+#    chown -R ${vhost_dir_uid}:${vhost_dir_uid} ${vhost_dir}
+#  fi
+#done
+# !!
+
+
 
 # Install Fuse S3FS and mount the S3 bucket for web server data - https://github.com/s3fs-fuse/s3fs-fuse
 feedback h1 'Install Fuse S3FS'
@@ -326,7 +399,10 @@ aws configure set region ${aws_region}
 aws configure set output ${aws_cli_output}
 feedback h3 'Mount the S3 bucket for static web data'
 mkdir --parents ${s3_mount_point}
-umount ${s3_mount_point}
+if mountpoint -q ${s3_mount_point}
+then
+  umount ${s3_mount_point}
+fi
 s3fs ${s3_bucket} ${s3_mount_point} -o allow_other -o use_path_request_style
 feedback body 'Set it to auto mount at boot'
 echo "# Mount AWS S3 bucket ${s3_bucket} for static web data" >> /etc/fstab
@@ -357,12 +433,12 @@ sed -i "s|i-.*\.cakeit\.nz|${instance_id}.${hosting_domain}|g" /etc/php-fpm.d/th
 # Include the vhost config on the EFS volume
 feedback h3 'Include the vhost config on the EFS volume'
 echo '; Include the vhosts stored on the EFS volume' > /etc/php-fpm.d/vhost.conf
-echo "include=${vhost_root}/vhosts-php-fpm.conf" >> /etc/php-fpm.d/vhost.conf
+echo "include=${efs_mount_point}/conf/vhosts-php-fpm.conf" >> /etc/php-fpm.d/vhost.conf
 feedback h3 'Restart PHP-FPM to recognise the additional PHP modules and config'
 systemctl restart php-fpm
 
 # Install Ghost Script, a PostScript interpreter and renderer that is used by WordPress for PDFs
-# Disabled as its being installed with PHP as a dependency
+# Disabled as its being installed as a dependency of PHP
 #feedback h1 'Install Ghost Script'
 #install_pkg 'ghostscript'
 
@@ -378,19 +454,22 @@ install_pkg 'mariadb'
 # This section will only be used for standalone installs. Eventually this will either use a dedicated EC2 running MariaDB or AWS RDS Aurora
 feedback h1 'Install the MariaDB server'
 install_pkg 'mariadb-server'
-feedback h3 'Sleep for 5 seconds as the database server wont start immediately after install'
-sleep 5
-feedback h3 'Start the database server and set it to auto start at boot'
-# !! Is this causing issues?
+# !!
+feedback error 'Not starting the database server. Code disabled as its causing yum issues (DB corruption, failed install) for this script'
+#feedback h3 'Sleep for 5 seconds as the database server wont start immediately after install'
+#sleep 5
+#feedback h3 'Start the database server'
 #systemctl restart mariadb
+feedback body 'Set it to auto start at boot'
 systemctl enable mariadb
 
 # Install the web server
 feedback h1 'Install the web server'
 manage_ale enable 'httpd_modules'
 install_pkg 'httpd mod_ssl'
-feedback h3 'Start the web server and set it to auto start at boot'
+feedback h3 'Start the web server'
 systemctl restart httpd
+feedback body 'Set it to auto start at boot'
 systemctl enable httpd
 
 # Customise the web server
@@ -399,29 +478,29 @@ feedback h2 'Customise the web server config'
 feedback h3 'Install additional Apache HTTPD modules'
 install_pkg 'https://dl-ssl.google.com/dl/linux/direct/mod-pagespeed-stable_current_x86_64.rpm'
 # Replace the Apache HTTPD MPM module prefork with the module event for HTTP/2 compatibility and to improve server performance
-feedback h3 'Disable the prefork MPM module and enable the event MPM module'
+feedback h3 'Change MPM modules from prefork to event'
 cp '/etc/httpd/conf.modules.d/00-mpm.conf' '/etc/httpd/conf.modules.d/00-mpm.conf.bak'
 sed -i 's|^LoadModule mpm_prefork_module modules/mod_mpm_prefork\.so$|#LoadModule mpm_prefork_module modules/mod_mpm_prefork.so|' /etc/httpd/conf.modules.d/00-mpm.conf
 sed -i 's|^#LoadModule mpm_event_module modules/mod_mpm_event\.so$|LoadModule mpm_event_module modules/mod_mpm_event.so|' /etc/httpd/conf.modules.d/00-mpm.conf
 # Disable the _default_ SSL config as it will be in the server specific config
-feedback h3 'Disable the _default_ SSL config'
+feedback h3 'Disable the default SSL config'
 mv '/etc/httpd/conf.d/ssl.conf' '/etc/httpd/conf.d/ssl.conf.disable'
 # Disable the welcome page config
 feedback h3 'Disable the welcome page config'
 mv '/etc/httpd/conf.d/welcome.conf' '/etc/httpd/conf.d/welcome.conf.disable'
 # Create a config for the server on the EBS volume
-feedback h3 'Create a _default_ virtual host config on EBS specific to this instance'
+feedback h3 'Create a _default_ virtual host config on this instance'
 cp "${vhost_root}/_default_/conf/instance-specific-httpd.conf" /etc/httpd/conf.d/this-instance.conf
 sed -i "s|i-instanceid\.cakeit\.nz|${instance_id}.${hosting_domain}|g" /etc/httpd/conf.d/this-instance.conf
 # Include the vhost config on the EFS volume
 feedback h3 'Include the vhost config from the EFS volume'
 echo '# Publish the vhosts stored on the EFS volume' > /etc/httpd/conf.d/vhost.conf
-echo "Include ${vhost_root}/vhosts-httpd.conf" >> /etc/httpd/conf.d/vhost.conf
+echo "Include ${efs_mount_point}/conf/vhosts-httpd.conf" >> /etc/httpd/conf.d/vhost.conf
 feedback h3 'Restart the web server'
 systemctl restart httpd
 
 # Create a DNS entry for the web host
-feedback h1 'Create DNS entry on Cloudflare'
+feedback h1 'Create a DNS entry on Cloudflare for this instance'
 curl -X POST "https://api.cloudflare.com/client/v4/zones/${cloudflare_zoneid}/dns_records" \
      -H "Authorization: Bearer ${cloudflare_api_token}" \
      -H "Content-Type: application/json" \
@@ -431,13 +510,12 @@ sleep 5
 
 # Install Let's Encrypt CertBot, requires EPEL
 feedback h1 'Install Lets Encrypt CertBot'
-# !! Bug This is where installing certbot with yum gives exit code 137 and fails to install python2-certbot-apache. Or it can't allocate memory
 install_pkg 'certbot python2-certbot-apache'
 # Create and install this instances certificates, these will be kept locally on EBS.  All vhost certificates need to be kept on EFS.
 feedback h2 'Get Lets Encrypt certificates for this server'
 mkdir --parents "${vhost_root}/_default_/log/${instance_id}.${hosting_domain}/letsencrypt"
 certbot certonly --domains "${instance_id}.${hosting_domain},web2.${hosting_domain}" --apache --non-interactive --agree-tos --email "${pki_email}" --no-eff-email --logs-dir "${vhost_root}/_default_/log/${instance_id}.${hosting_domain}/letsencrypt" --redirect --must-staple --staple-ocsp --hsts --uir
-# Customise the config to include the new certificate created by certbot
+# Customise the _default_ vhost config to include the new certificate created by certbot
 if [[ -f "/etc/letsencrypt/live/${instance_id}.${hosting_domain}/fullchain.pem" && -f "/etc/letsencrypt/live/${instance_id}.${hosting_domain}/privkey.pem" ]]
 then
   feedback h3 'Add the certificates to the web server config'
@@ -449,8 +527,10 @@ then
   systemctl restart httpd
 fi
 # Link each of the vhosts listed in vhosts-httpd.conf to letsencrypt on this instance. So that all instances can renew all certificates as required
+# !! As this will need to run daily, should I just call on a script from the efs/script folder and avoid code duplication?
 feedback h3 'Include the vhosts Lets Encrypt config on this server'
-vhost_list=`grep -i '^include ' ${vhost_root}/vhosts-httpd.conf | sed "s|[iI]nclude \"${vhost_root}/||g; s|/conf/httpd.conf\"||g;"`
+# !! Next line disabled as the variable is now set in common_variables script. Delete once tested
+#vhost_list=`grep -i '^include ' ${efs_mount_point}/conf/vhosts-httpd.conf | sed "s|[iI]nclude \"${vhost_root}/||g; s|/conf/httpd.conf\"||g;"`
 for vhost in ${vhost_list}
 do
   if [ -f "${vhost_root}/${vhost}/conf/pki.conf" ]
@@ -464,7 +544,7 @@ done
 feedback h3 'Add a job to cron to run certbot daily'
 echo '#!/usr/bin/env bash' > /etc/cron.daily/certbot
 echo '# Update this instances configuration including what certificates need to be renewed' >> /etc/cron.daily/certbot
-echo "${vhost_root}/scripts/update_instance-vhosts_pki.sh" >> /etc/cron.daily/certbot
+echo "${efs_mount_point}/script/update_instance-vhosts_pki.sh" >> /etc/cron.daily/certbot
 echo '# Run Lets Encrypt Certbot to revoke and/or renew certiicates' >> /etc/cron.daily/certbot
 echo 'certbot renew --no-self-upgrade' >> /etc/cron.daily/certbot
 chmod 0770 /etc/cron.daily/certbot
