@@ -23,7 +23,6 @@
 #     - All constants (static) in common_variables should be moved to AWS Parameter store e.g. vhost_httpd_conf. Dynamic ones (e.g. vhost_list) would remain in the common_variables script
 #     - Some of the AWS CLI calls to the parameter store in this script should be moved to the common_variables script to stop duplication of code, but some will have to be duplicated still e.g. efs_mount_point
 #   Action: Need a shared user directory for PAM/users. So that file ownership on EFS is the same on all instances
-#   Action: Require a parameter for this script to go, otherwise exist with an error message. Protect against people running it again unknowningly
 #   Action: Keep all temporal data with vhost e.g. php session and cache data. And configure PHP security features like chroot
 #   Action: Ensure that when Lets Encrypt renews a vhosts certificate that it stores the latest versions on EFS with the vhost, not on EBS
 #   Action: Configure a local DB, Aurora Serverless resume is too slow (~25s)
@@ -54,6 +53,11 @@
 #   Question: Can I shrink the EBS volume, its 8 GB but using 2.3GB
 #   Question: Launch instance has a mount EFS volume option, is this better than what I have scripted? Can't find option in launch template
 #
+# !! Need event based system to issue commands to instances, don't use cron as wasted CPU cycles, increased risk of faliure, more complex code base etc
+#     - Have HTTPD & PHP reload the config after changing a vhost e.g. systemctl restart httpd php-fpm
+#     - add/delete users, groups, and group members as required
+# !! Ideally this would use IAM users to support MFA and a user ID that could tie to other services e.g. a S3 bucket dedicated to a IAM user
+#
 
 #======================================
 # Declare the arrays
@@ -69,10 +73,10 @@ check_pid_lock () {
   if [[ ${2} =~ [^0-9] ]]
   then
     feedback error "check_pid_lock Invalid timer specified, using default of ${sleep_max_timer}"
-  elif [[ ! -z ${2} && ${2} -ge 0 && ${2} -le 3600 ]]
+  elif [[ -n ${2} && ${2} -ge 0 && ${2} -le 3600 ]]
   then
     sleep_max_timer=${2}
-  elif [[ ! -z ${2} ]]
+  elif [[ -n ${2} ]]
   then
     feedback error "check_pid_lock Timer outside of 0-3600 range, using default of ${sleep_max_timer}"
   fi
@@ -179,11 +183,20 @@ manage_ale () {
 #======================================
 # Say hello
 #--------------------------------------
-script_ver=`grep '^# Version:[ \t]*' ${0} | sed 's|# Version:[ \t]*||'`
-feedback title "Build script started"
-feedback body "Script: ${0}"
-feedback body "Version: ${script_ver}"
-feedback body "Started: `date`"
+
+if [ "${1}" == "go" ]
+then
+  script_ver=`grep '^# Version:[ \t]*' ${0} | sed 's|# Version:[ \t]*||'`
+  feedback title "Build script started"
+  feedback body "Script: ${0}"
+  feedback body "Version: ${script_ver}"
+  feedback body "Started: `date`"
+else
+  feedback error 'Script exiting because you didnt use the special word'
+  feedback body 'This script could cause damage, this is to protect against running it unintentionally'
+  feedback body "Run \'${0} go\' to run the script"
+  exit
+fi
 
 #======================================
 # Declare the constants
@@ -346,46 +359,25 @@ do
     # These vhost directories don't need vhost users created
     feedback body "Skipping ${vhost_dir}"
   else
-    # Create the owner accounts, no one logs in as an owner account they are just to own the data for the vhost
+    # Create the owner accounts
+    # Owner accounts exist to own the data & processes for the vhost, and (using their group) can delegate full access within a vhost to an end user
     vhost_dir_uid=`stat -c '%u' "${vhost_root}/${vhost_dir}"`
-    feedback body "Creating user ${vhost_dir} with UID ${vhost_dir_uid}"
-    useradd "${vhost_dir}" --uid ${vhost_dir_uid} --home-dir "${vhost_root}/${vhost_dir}" --groups vhost_owners,vhost_all
+    vhost_dir_gid=`stat -c '%g' "${vhost_root}/${vhost_dir}"`
+    feedback body "Creating owner ${vhost_dir} with UID/GID ${vhost_dir_uid}/${vhost_dir_gid} for ${vhost_root}/${vhost_dir}"
+    groupadd --gid ${vhost_dir_gid} "${vhost_dir}"
+    useradd --uid ${vhost_dir_uid} --gid ${vhost_dir_gid} --shell /sbin/nologin --home-dir "${vhost_root}/${vhost_dir}" --groups vhost_owners,vhost_all "${vhost_dir}"
     # Create the end user accounts, these user accounts are used to login (e.g. using SSH) to manage a vhsot and will generally represent a real person.
-    # !! Get the list of end users from the PKI/SSH keys in vhost/pki
+    # !! end users is for customers that actually login via services (e.g. web portal/API etc) or shell (SSH/SCP etc)
+    # !! Get the list of end users from the PKI/SSH keys in vhost/pki?
+    # !! Would be even better if end users used OpenID or oAuth so no credenditals are stored here... Better UX as fewer passwords etc.
     # !! Not sure if I should/need to specify the UID for end users or leave it to fate
-    # !! End users will need to be a member of the vhost's owner group e.g. mike would be a member of cakeit.nz... A user should be able to be a member of many vhosts with one user ID
-    #useradd "${end_user}" --uid ${end_user_uid} --home-dir "${vhost_root}/${vhost_dir}" --groups vhost_users,vhost_all,${vhost_dir}
+    # !! End users will need to be a member of the vhost's owner group e.g. mike would be a member of cakeit.nz & competitiveedge.nz which are the primary groups of the vhost owners... A user must be able to be a member of many vhosts with one user ID
+    #useradd --uid ${end_user_uid} --gid ${end_user_gid} --home-dir "${vhost_root}/${vhost_dir}" --groups vhost_users,vhost_all,${vhost_dir} "${end_user}"
+    # !! Must be able to add a user to a owners group to give them access and it sticks (not lost when scripts run to build/update instances). Ant remain consistent across all instances
+    # !! Extend script to delete or disable existing users?  Maybe disable all users in vhost_users and then re-enable if directory still exists?
+    # !! Do I even need to disable as no password? Depend on user ID & SSH/PKI token?
   fi
 done
-# !! Create cron job in cron.hourly to add/delete users as required
-# !! Extend script to delete or disable existing users?  Maybe disable all users in vhost_users and then re-enable if directory still exists?
-# !! Do I even need to disable as no password? Depend on user ID & SSH/PKI token?
-# !! Ideally this would use IAM users to support MFA and a user ID that could tie to other services e.g. a S3 bucket dedicated to a IAM user
-
-# !! Do I need to create the users primary group before creating the user e.g. groupadd --gid 2001 competitiveedge.nz; useradd --uid 2001 --gid 2001 competitiveedge.nz
-
-# Sync GID of my generic groups and the GID of the vhost owners
-# owners never login. Exist only to own the files and folders for the vhost
-# users is for end users only that actually login. Remove the owners currently in the build script
-# create a Vhost_all group that includes users and owners
-
-
-# !! Delete this section once complete in SSH
-#for vhost_dir in ${vhost_dir_list}
-#do
-#  if [ "${vhost_dir}" == "_default_" ] || [ "${vhost_dir}" == "example.com" ]
-#  then
-#    # System folders that don't need vhost users created
-#    echo "Skipping ${vhost_dir}"
-#  else
-#    vhost_dir_uid=`stat -c '%u' "${vhost_root}/${vhost_dir}"`
-#    echo "Setting owner of ${vhost_dir} to UID & GID of ${vhost_dir_uid}"
-#    chown -R ${vhost_dir_uid}:${vhost_dir_uid} ${vhost_dir}
-#  fi
-#done
-# !!
-
-
 
 # Install Fuse S3FS and mount the S3 bucket for web server data - https://github.com/s3fs-fuse/s3fs-fuse
 feedback h1 'Install Fuse S3FS'
@@ -529,8 +521,6 @@ fi
 # Link each of the vhosts listed in vhosts-httpd.conf to letsencrypt on this instance. So that all instances can renew all certificates as required
 # !! As this will need to run daily, should I just call on a script from the efs/script folder and avoid code duplication?
 feedback h3 'Include the vhosts Lets Encrypt config on this server'
-# !! Next line disabled as the variable is now set in common_variables script. Delete once tested
-#vhost_list=`grep -i '^include ' ${efs_mount_point}/conf/vhosts-httpd.conf | sed "s|[iI]nclude \"${vhost_root}/||g; s|/conf/httpd.conf\"||g;"`
 for vhost in ${vhost_list}
 do
   if [ -f "${vhost_root}/${vhost}/conf/pki.conf" ]
