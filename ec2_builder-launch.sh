@@ -111,4 +111,4 @@ curl -H "Authorization: token ${github_api_token}" \
 chmod 0700 "/root/${app}"
 
 feedback h3 'Execute the build script'
-"/root/${app}"
+"/root/${app} go"
