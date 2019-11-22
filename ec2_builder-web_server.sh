@@ -18,40 +18,40 @@
 # Updates:
 #
 # Improvements to be made:
-#   Action: Use 'source /mnt/efs/script/common_variables.sh' after mounting the EFS so that the code in that script (e.g. setting vhost_list) is not duplicated in this script
+#   * Use 'source /mnt/efs/script/common_variables.sh' after mounting the EFS so that the code in that script (e.g. setting vhost_list) is not duplicated in this script
 #     - If I do then the IAM user will need rights to the parameter store.
 #     - All constants (static) in common_variables should be moved to AWS Parameter store e.g. vhost_httpd_conf. Dynamic ones (e.g. vhost_list) would remain in the common_variables script
 #     - Some of the AWS CLI calls to the parameter store in this script should be moved to the common_variables script to stop duplication of code, but some will have to be duplicated still e.g. efs_mount_point
-#   Action: Need a shared user directory for PAM/users. So that file ownership on EFS is the same on all instances
-#   Action: Keep all temporal data with vhost e.g. php session and cache data. And configure PHP security features like chroot
-#   Action: Ensure that when Lets Encrypt renews a vhosts certificate that it stores the latest versions on EFS with the vhost, not on EBS
-#   Action: Configure a local DB, Aurora Serverless resume is too slow (~25s)
-#   Action: Import my confluence download and any other info into the wiki
-#   Action: Add support to run both PHP 5 and 7
+#   * Need a shared user directory for PAM/users. So that file ownership on EFS is the same on all instances
+#   * Keep all temporal data with vhost e.g. php session and cache data. And configure PHP security features like chroot
+#   * Ensure that when Lets Encrypt renews a vhosts certificate that it stores the latest versions on EFS with the vhost, not on EBS
+#   * Configure a local DB, Aurora Serverless resume is too slow (~25s)
+#   * Import my confluence download and any other info into the wiki
+#   * Add support to run both PHP 5 and 7
 #     - https://stackoverflow.com/questions/42696856/running-two-php-versions-on-the-same-server
 #     - https://stackoverflow.com/questions/45033511/how-to-select-php-version-5-and-7-per-virtualhost-in-apache-2-4-on-debian
-#   Action: Automate backups of web data (config, DB & files) at the same timestamp to allow easy recovery
+#   * Automate backups of web data (config, DB & files) at the same timestamp to allow easy recovery
 #
-#   Action: Move websites to web2
+#   * Move websites to web2
 #
-#   Action: Run the processes that are specific to a vhost as its own user. Q-Username should be domain name or a cn like competitive_edge?
-#   Action: Configure security apps for defense in depth, take ideas from my suse studio scripts
-#   Action: Add self-testing and self-healing to the build script to make sure everything is built and working properly e.g. did the DNS record create successfully
+#   * Run the processes that are specific to a vhost as its own user. Q-Username should be domain name or a cn like competitive_edge?
+#   * Configure security apps for defense in depth, take ideas from my suse studio scripts
+#   * Add self-testing and self-healing to the build script to make sure everything is built and working properly e.g. did the DNS record create successfully
 #
-#   Action: SES for mail relay? So don't need SMTP out from server
-#   Action: Install Tomcat?
-#   Action: Static web data on S3, use a shared bucket to keep admin easy. Ideal would be a bucket per customer for security.
+#   * SES for mail relay? So don't need SMTP out from server
+#   * Install Tomcat?
+#   * Static web data on S3, use a shared bucket to keep admin easy. Ideal would be a bucket per customer for security.
 #
-#   Action: Upgrade to load balancing the web serving work across 2 or more instances
-#   Action: Upgrade to multi-AZ, or even multi-region for all components.
-#   Action: Move to a multi-account structure using AWS Organisations. Use AWS CloudFormer to define all the resources in a template.
-#   Action: Create CloudFormation templates for all the AWS resources so that the entire setup can be created fresh in new AWS accounts
-#   Action: Is there a way to make the AWS AMI (Amazon Linux 2) as read only base, and all writes from this script, users logging in, or system use (e.g. logging) are written to a 2nd EBS volume?
+#   * Upgrade to load balancing the web serving work across 2 or more instances
+#   * Upgrade to multi-AZ, or even multi-region for all components.
+#   * Move to a multi-account structure using AWS Organisations. Use AWS CloudFormer to define all the resources in a template.
+#   * Create CloudFormation templates for all the AWS resources so that the entire setup can be created fresh in new AWS accounts
+#   * Is there a way to make the AWS AMI (Amazon Linux 2) as read only base, and all writes from this script, users logging in, or system use (e.g. logging) are written to a 2nd EBS volume?
 #
-#   Action: Get all S3 data into right storage tier. Files smaller than ?128KB? on S3IA or S3. Data larger than that in Deep Archive. Check inventory files.
+#   * Get all S3 data into right storage tier. Files smaller than ?128KB? on S3IA or S3. Data larger than that in Deep Archive. Check inventory files.
 #
-#   Question: Can I shrink the EBS volume, its 8 GB but using 2.3GB
-#   Question: Launch instance has a mount EFS volume option, is this better than what I have scripted? Can't find option in launch template
+#   * Can I shrink the EBS volume, its 8 GB but using 2.3GB
+#   * Launch instance has a mount EFS volume option, is this better than what I have scripted? Can't find option in launch template
 #
 # !! Need event based system to issue commands to instances, don't use cron as wasted CPU cycles, increased risk of faliure, more complex code base etc
 #     - Have HTTPD & PHP reload the config after changing a vhost e.g. systemctl restart httpd php-fpm
@@ -183,7 +183,6 @@ manage_ale () {
 #======================================
 # Say hello
 #--------------------------------------
-
 if [ "${1}" == "go" ]
 then
   script_ver=`grep '^# Version:[ \t]*' ${0} | sed 's|# Version:[ \t]*||'`

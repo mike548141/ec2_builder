@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.1.0-20191113
+# Version:      0.1.1-20191122
 # File:         ec2_builder-launch.sh
 # License:      GNU GPL v3
 # Language:     bash
+# Source:       https://github.com/mike548141/ec2_builder
 #
 # Description:
-#  This script is a bridge between an AWS EC2 Launch Template and the script that configures the instance for its role, developed on an Amazon Linux 2 AMI.
+#  This script is a bridge between an AWS EC2 Launch Template and the script that configures the instance for its role, developed on an Amazon Linux 2 AMI using a t3a.nano instance.
 #
 # References:
 #
@@ -78,12 +79,13 @@ feedback title "Launch script started"
 feedback body "Script: ${0}"
 feedback body "Version: ${script_ver}"
 feedback body "Started: `date`"
+feedback h1 'Launching'
 
 #======================================
 # Declare the constants
 #--------------------------------------
-feedback h3 'Setting the initial constants'
-# Define the keys constants to decide what we are building
+# These are just to download the build script, the build script defines its own tenancy, environment, and build definition
+feedback body 'Setting the constants for the launch stage'
 tenancy='cakeIT'
 resource_environment='prod'
 app='ec2_builder-web_server.sh'
@@ -103,7 +105,7 @@ github_api_token=`aws ssm get-parameter --name "${common_parameters}/github/api_
 #======================================
 # Lets get into it
 #--------------------------------------
-feedback h3 'Download the build script'
+feedback body 'Download the build script'
 cd /root
 curl -H "Authorization: token ${github_api_token}" \
      -H 'Accept: application/vnd.github.v4.raw' \
@@ -111,4 +113,4 @@ curl -H "Authorization: token ${github_api_token}" \
 chmod 0700 "/root/${app}"
 
 feedback h3 'Execute the build script'
-"/root/${app} go"
+"/root/${app}" go
