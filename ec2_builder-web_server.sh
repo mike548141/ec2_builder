@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.27-20191122
+# Version:      0.7.30-20191123
 # File:         ec2_builder-web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -18,10 +18,6 @@
 # Updates:
 #
 # Improvements to be made:
-#   * Use 'source /mnt/efs/script/common_variables.sh' after mounting the EFS so that the code in that script (e.g. setting vhost_list) is not duplicated in this script
-#     - If I do then the IAM user will need rights to the parameter store.
-#     - All constants (static) in common_variables should be moved to AWS Parameter store e.g. vhost_httpd_conf. Dynamic ones (e.g. vhost_list) would remain in the common_variables script
-#     - Some of the AWS CLI calls to the parameter store in this script should be moved to the common_variables script to stop duplication of code, but some will have to be duplicated still e.g. efs_mount_point
 #   * Need a shared user directory for PAM/users. So that file ownership on EFS is the same on all instances
 #   * Keep all temporal data with vhost e.g. php session and cache data. And configure PHP security features like chroot
 #   * Ensure that when Lets Encrypt renews a vhosts certificate that it stores the latest versions on EFS with the vhost, not on EBS
@@ -53,15 +49,28 @@
 #   * Can I shrink the EBS volume, its 8 GB but using 2.3GB
 #   * Launch instance has a mount EFS volume option, is this better than what I have scripted? Can't find option in launch template
 #
-# !! Need event based system to issue commands to instances, don't use cron as wasted CPU cycles, increased risk of faliure, more complex code base etc
+#   * Need event based host management system to issue commands to instances, don't use cron as wasted CPU cycles, increased risk of faliure, more complex code base etc
 #     - Have HTTPD & PHP reload the config after changing a vhost e.g. systemctl restart httpd php-fpm
-#     - add/delete users, groups, and group members as required
-# !! Ideally this would use IAM users to support MFA and a user ID that could tie to other services e.g. a S3 bucket dedicated to a IAM user
+#     - add/delete users, groups, and group members as required. Ideally users & groups would be on a directory service
+#   * Ideally this would use IAM users to support MFA and a user ID that could tie to other services e.g. a S3 bucket dedicated to a IAM user
 #
+
+# Create the end user accounts, these user accounts are used to login (e.g. using SSH) to manage a vhsot and will generally represent a real person.
+# !! end users is for customers that actually login via services (e.g. web portal/API etc) or shell (SSH/SCP etc)
+# Get the list of end users from the PKI/SSH keys in vhost/pki?
+# Would be even better if end users used OpenID or oAuth so no credenditals are stored here... Better UX as fewer passwords etc.
+# Not sure if I should/need to specify the UID for end users or leave it to fate
+# End users will need to be a member of the vhost's owner group e.g. mike would be a member of cakeit.nz & competitiveedge.nz which are the primary groups of the vhost owners... A user must be able to be a member of many vhosts with one user ID
+#useradd --uid ${end_user_uid} --gid ${end_user_gid} --home-dir "${vhost_root}/${vhost_dir}" --groups vhost_users,vhost_all,${vhost_dir} "${end_user}"
+# Must be able to add a user to a owners group to give them access and it sticks (not lost when scripts run to build/update instances). Ant remain consistent across all instances
+# Extend script to delete or disable existing users?  Maybe disable all users in vhost_users and then re-enable if directory still exists?
+# Do I even need to disable as no password? Depend on user ID & SSH/PKI token?
+
 
 #======================================
 # Declare the arrays
 #--------------------------------------
+
 
 #======================================
 # Declare the libraries and functions
@@ -98,6 +107,7 @@ check_pid_lock () {
     fi
   done
 }
+
 
 # Beautifies the feedback to the user/log file on std_out
 feedback () {
@@ -144,6 +154,7 @@ feedback () {
   fi
 }
 
+
 # Install an app using yum
 install_pkg () {
   check_pid_lock 'yum'
@@ -174,11 +185,13 @@ install_pkg () {
   check_pid_lock 'yum'
 }
 
+
 # Wrap the amazon_linux_extras script with additional steps
 manage_ale () {
   amazon-linux-extras ${1} ${2}
   yum clean metadata
 }
+
 
 #======================================
 # Say hello
@@ -191,11 +204,13 @@ then
   feedback body "Version: ${script_ver}"
   feedback body "Started: `date`"
 else
-  feedback error 'Script exiting because you didnt use the special word'
-  feedback body 'This script could cause damage, this is to protect against running it unintentionally'
-  feedback body "Run \'${0} go\' to run the script"
-  exit
+  feedback error 'Exiting because you did not use the special word'
+  feedback body 'This is to protect against running this script unintentionally, it could cause damage'
+  feedback body "Run '${0} go' to execute the script"
+  echo ''
+  exit 1
 fi
+
 
 #======================================
 # Declare the constants
@@ -210,8 +225,6 @@ app='ec2_builder-web_server.sh'
 common_parameters="/${tenancy}/${resource_environment}/common"
 app_parameters="/${tenancy}/${resource_environment}/${service_group}/${app}"
 
-# Set the initial AWS region setting using the instances placement so that we can connect to the AWS SSM parameter store
-aws_region=`ec2-metadata --availability-zone | cut -c 12-20`
 # Get the instance name
 instance_id=`ec2-metadata --instance-id | cut -c 14-`
 
@@ -222,34 +235,18 @@ if [ -f '/root/.aws/credentials' ]
 then
   rm --force '/root/.aws/credentials'
 fi
-# Default config for AWS CLI tools
+# Assume the instances placement is the same region where the AWS SSM Parameter Store is found
+aws_region=`ec2-metadata --availability-zone | cut -c 12-20`
+# Connect to AWS SSM Parameter Store to see what region we should be using
 aws_region=`aws ssm get-parameter --name "${app_parameters}/awscli/aws_region" --query 'Parameter.Value' --output text --region ${aws_region}`
-aws_cli_output=`aws ssm get-parameter --name "${app_parameters}/awscli/aws_cli_output" --query 'Parameter.Value' --output text --region ${aws_region}`
-# The domain name used by the servers for web hosting, this domain name represents the hosting provider and not its customers vhosts
-hosting_domain=`aws ssm get-parameter --name "${app_parameters}/hosting_domain" --query 'Parameter.Value' --output text --region ${aws_region}`
-# This AWS API key and secret is attached to the IAM user ec2.web.cakeit.nz
-aws_access_key_id=`aws ssm get-parameter --name "${app_parameters}/awscli/aws_access_key_id" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption`
-aws_secret_access_key=`aws ssm get-parameter --name "${app_parameters}/awscli/aws_secret_access_key" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption`
-# Cloudflare API secret
-cloudflare_zoneid=`aws ssm get-parameter --name "${common_parameters}/cloudflare/${hosting_domain}/zone_id" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption`
-cloudflare_api_token=`aws ssm get-parameter --name "${common_parameters}/cloudflare/${hosting_domain}/api_token" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption`
-# The AWS EFS volume and mount point used to hold virtual host config, content and logs that is shared between web hosts (aka instances)
-efs_volume=`aws ssm get-parameter --name "${app_parameters}/efs_volume" --query 'Parameter.Value' --output text --region ${aws_region}`
-efs_mount_point=`aws ssm get-parameter --name "${app_parameters}/efs_mount_point" --query 'Parameter.Value' --output text --region ${aws_region}`
-vhost_root=`aws ssm get-parameter --name "${app_parameters}/vhost_root" --query 'Parameter.Value' --output text --region ${aws_region}`
-# The AWS S3 volume used to hold web content that is shared between web hosts, not currently used but is cheaper than EFS
-s3_bucket=`aws ssm get-parameter --name "${app_parameters}/s3_bucket" --query 'Parameter.Value' --output text --region ${aws_region}`
-s3_mount_point=`aws ssm get-parameter --name "${app_parameters}/s3_mount_point" --query 'Parameter.Value' --output text --region ${aws_region}`
-# The contact email address for Lets Encrypt if a certificate problem comes up
-pki_email=`aws ssm get-parameter --name "${app_parameters}/pki_email" --query 'Parameter.Value' --output text --region ${aws_region}`
-# The AWS Elastic IP address used to web host
-eip_allocation_id=`aws ssm get-parameter --name "${app_parameters}/eip_allocation_id" --query 'Parameter.Value' --output text --region ${aws_region}`
+
 
 #======================================
 # Set the initial values for the variables
 #--------------------------------------
 # Gather variable instance specific information
 public_ipv4=`ec2-metadata --public-ipv4 | cut -c 14-`
+
 
 #======================================
 # Lets get into it
@@ -281,8 +278,12 @@ echo 'MACs hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com,umac-128-
 feedback h3 'Restart OpenSSH server'
 systemctl restart sshd
 
+
 # Allocate the AWS EIP to this instance
 feedback h1 'Allocate the EIP public IP address to this instance'
+# Get the AWS Elastic IP address used to web host
+eip_allocation_id=`aws ssm get-parameter --name "${app_parameters}/eip_allocation_id" --query 'Parameter.Value' --output text --region ${aws_region}`
+# Allocate the EIP
 aws ec2 associate-address --instance-id ${instance_id} --allocation-id ${eip_allocation_id} --region ${aws_region}
 # Update the public IP address assigned now the EIP is associated
 feedback body 'Sleep for 5 seconds to allow metadata to update after the EIP association'
@@ -290,15 +291,18 @@ sleep 5
 public_ipv4=`ec2-metadata --public-ipv4 | cut -c 14-`
 feedback body "EIP address ${public_ipv4} associated"
 
+
 # Update the software stack
 feedback h1 'Update the software stack'
 yum update --assumeyes
 systemctl daemon-reload
 
+
 # Add access to Extra Packages for Enterprise Linux (EPEL) from the Fedora project
 feedback h1 'Add access to Extra Packages for Enterprise Linux (EPEL) from the Fedora project'
 manage_ale enable 'epel'
 install_pkg 'epel-release'
+
 
 # Install the management agents
 feedback h1 'Install the management agents'
@@ -312,15 +316,20 @@ install_pkg 'amazon-ssm-agent'
 #install_pkg 'puppet'
 #install_pkg 'salt'
 
+
 # Install security apps, requires EPEL
 feedback h1 'Install host security apps'
 #install_pkg 'fail2ban firewalld rkhunter selinux-policy tripwire'
 install_pkg 'rkhunter tripwire'
 
+
 # Install AWS EFS helper and mount the EFS volume for vhost data
 feedback h1 'Install AWS EFS helper'
 install_pkg 'amazon-efs-utils'
 feedback h3 'Mount the EFS volume for vhost data'
+# The AWS EFS volume and mount point used to hold virtual host config, content and logs that is shared between web hosts (aka instances)
+efs_volume=`aws ssm get-parameter --name "${app_parameters}/efs_volume" --query 'Parameter.Value' --output text --region ${aws_region}`
+efs_mount_point=`aws ssm get-parameter --name "${app_parameters}/efs_mount_point" --query 'Parameter.Value' --output text --region ${aws_region}`
 mkdir --parents ${efs_mount_point}
 if mountpoint -q ${efs_mount_point}
 then
@@ -331,18 +340,19 @@ feedback body 'Set it to auto mount at boot'
 echo "# Mount AWS EFS volume ${efs_volume} for the web root data" >> /etc/fstab
 echo "${efs_volume}:/ ${efs_mount_point} efs tls,_netdev 0 0" >> /etc/fstab
 
+
 # Import the common constants and variables held in a script on the EFS volume. This saves duplicating code between scripts
-feedback h1 'Import the common constants and variables'
+feedback h1 'Import the common constants and variables from EFS'
 source "${efs_mount_point}/script/common_variables.sh"
-# !! Where common_variables provides better variables swap the code in this script to use them e.g. ${vhost_httpd_conf} instead of ${efs_mount_point}/conf/vhosts-httpd.conf
+
 
 # Create a directory for this instances log files on the EFS volume
 feedback h1 'Create a space for this instances log files on the EFS volume'
 mkdir --parents "${vhost_root}/_default_/log/${instance_id}.${hosting_domain}"
 
+
 # Create users and groups
 # The OS and base AMI packages use 0-1000 for the UID's and GID's they require. I have reserved 1001-2000 for UID's and GID's that are intrinsic to the build. UID & GID 2001 and above are for general use.
-# !! As this will need to run hourly, should I just call on a script from the efs/script folder and avoid code duplication?
 feedback h1 'Configure local users and groups to match those on EFS'
 # Groups
 feedback h3 'Create groups'
@@ -364,31 +374,36 @@ do
     vhost_dir_gid=`stat -c '%g' "${vhost_root}/${vhost_dir}"`
     feedback body "Creating owner ${vhost_dir} with UID/GID ${vhost_dir_uid}/${vhost_dir_gid} for ${vhost_root}/${vhost_dir}"
     groupadd --gid ${vhost_dir_gid} "${vhost_dir}"
-    useradd --uid ${vhost_dir_uid} --gid ${vhost_dir_gid} --shell /sbin/nologin --home-dir "${vhost_root}/${vhost_dir}" --groups vhost_owners,vhost_all "${vhost_dir}"
-    # Create the end user accounts, these user accounts are used to login (e.g. using SSH) to manage a vhsot and will generally represent a real person.
-    # !! end users is for customers that actually login via services (e.g. web portal/API etc) or shell (SSH/SCP etc)
-    # !! Get the list of end users from the PKI/SSH keys in vhost/pki?
-    # !! Would be even better if end users used OpenID or oAuth so no credenditals are stored here... Better UX as fewer passwords etc.
-    # !! Not sure if I should/need to specify the UID for end users or leave it to fate
-    # !! End users will need to be a member of the vhost's owner group e.g. mike would be a member of cakeit.nz & competitiveedge.nz which are the primary groups of the vhost owners... A user must be able to be a member of many vhosts with one user ID
-    #useradd --uid ${end_user_uid} --gid ${end_user_gid} --home-dir "${vhost_root}/${vhost_dir}" --groups vhost_users,vhost_all,${vhost_dir} "${end_user}"
-    # !! Must be able to add a user to a owners group to give them access and it sticks (not lost when scripts run to build/update instances). Ant remain consistent across all instances
-    # !! Extend script to delete or disable existing users?  Maybe disable all users in vhost_users and then re-enable if directory still exists?
-    # !! Do I even need to disable as no password? Depend on user ID & SSH/PKI token?
+    useradd --uid ${vhost_dir_uid} --gid ${vhost_dir_gid} --shell /sbin/nologin --home-dir "${vhost_root}/${vhost_dir}" --no-create-home --groups vhost_owners,vhost_all "${vhost_dir}"
   fi
 done
+
+
+# Default config for AWS CLI tools
+feedback h1 'Configure AWS CLI for the root user'
+aws_cli_output=`aws ssm get-parameter --name "${app_parameters}/awscli/aws_cli_output" --query 'Parameter.Value' --output text --region ${aws_region}`
+aws configure set region ${aws_region}
+aws configure set output ${aws_cli_output}
+
 
 # Install Fuse S3FS and mount the S3 bucket for web server data - https://github.com/s3fs-fuse/s3fs-fuse
 feedback h1 'Install Fuse S3FS'
 install_pkg 's3fs-fuse'
 feedback h3 'Configure FUSE'
 sed -i 's|^# user_allow_other$|user_allow_other|' /etc/fuse.conf
-feedback h3 'Configure AWS CLI for root user, S3FS uses the same credential file'
+feedback h3 'Configure AWS CLI credentials for the root user, S3FS uses the same file'
+# This AWS API key and secret is attached to the IAM user ec2.web.cakeit.nz
+aws_access_key_id=`aws ssm get-parameter --name "${app_parameters}/awscli/aws_access_key_id" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption`
+aws_secret_access_key=`aws ssm get-parameter --name "${app_parameters}/awscli/aws_secret_access_key" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption`
 aws configure set aws_access_key_id ${aws_access_key_id}
 aws configure set aws_secret_access_key ${aws_secret_access_key}
-aws configure set region ${aws_region}
-aws configure set output ${aws_cli_output}
+# Clear the secret from memory
+unset aws_access_key_id
+unset aws_secret_access_key
 feedback h3 'Mount the S3 bucket for static web data'
+# The AWS S3 bucket used to hold web content that is shared between web hosts, not currently used but is cheaper than EFS
+s3_bucket=`aws ssm get-parameter --name "${app_parameters}/s3_bucket" --query 'Parameter.Value' --output text --region ${aws_region}`
+s3_mount_point=`aws ssm get-parameter --name "${app_parameters}/s3_mount_point" --query 'Parameter.Value' --output text --region ${aws_region}`
 mkdir --parents ${s3_mount_point}
 if mountpoint -q ${s3_mount_point}
 then
@@ -398,6 +413,7 @@ s3fs ${s3_bucket} ${s3_mount_point} -o allow_other -o use_path_request_style
 feedback body 'Set it to auto mount at boot'
 echo "# Mount AWS S3 bucket ${s3_bucket} for static web data" >> /etc/fstab
 echo "s3fs#${s3_bucket} ${s3_mount_point} fuse _netdev,allow_other,use_path_request_style 0 0" >> /etc/fstab
+
 
 # Install scripting languages
 feedback h1 'Install scripting languages'
@@ -428,31 +444,35 @@ echo "include=${efs_mount_point}/conf/vhosts-php-fpm.conf" >> /etc/php-fpm.d/vho
 feedback h3 'Restart PHP-FPM to recognise the additional PHP modules and config'
 systemctl restart php-fpm
 
+
 # Install Ghost Script, a PostScript interpreter and renderer that is used by WordPress for PDFs
-# Disabled as its being installed as a dependency of PHP
-#feedback h1 'Install Ghost Script'
-#install_pkg 'ghostscript'
+feedback h1 'Install Ghost Script'
+install_pkg 'ghostscript'
+
 
 # Install Git to support content versioning in MediaWiki
 feedback h1 'Install Git'
 install_pkg 'git'
 
+
 # Install the MariaDB client for connecting to Aurora Serverless to manage the databases
 feedback h1 'Install the MariaDB client'
 install_pkg 'mariadb'
+
 
 # Install MariaDB server to host databases as Aurora Serverless resume is too slow (~25s)
 # This section will only be used for standalone installs. Eventually this will either use a dedicated EC2 running MariaDB or AWS RDS Aurora
 feedback h1 'Install the MariaDB server'
 install_pkg 'mariadb-server'
 # !!
-feedback error 'Not starting the database server. Code disabled as its causing yum issues (DB corruption, failed install) for this script'
+feedback error 'Not starting the database server. Code disabled as its causing yum issues (DB corruption, failed install) for the build script'
 #feedback h3 'Sleep for 5 seconds as the database server wont start immediately after install'
 #sleep 5
 #feedback h3 'Start the database server'
 #systemctl restart mariadb
 feedback body 'Set it to auto start at boot'
 systemctl enable mariadb
+
 
 # Install the web server
 feedback h1 'Install the web server'
@@ -462,7 +482,6 @@ feedback h3 'Start the web server'
 systemctl restart httpd
 feedback body 'Set it to auto start at boot'
 systemctl enable httpd
-
 # Customise the web server
 feedback h2 'Customise the web server config'
 # Install extra modules
@@ -486,24 +505,33 @@ sed -i "s|i-instanceid\.cakeit\.nz|${instance_id}.${hosting_domain}|g" /etc/http
 # Include the vhost config on the EFS volume
 feedback h3 'Include the vhost config from the EFS volume'
 echo '# Publish the vhosts stored on the EFS volume' > /etc/httpd/conf.d/vhost.conf
-echo "Include ${efs_mount_point}/conf/vhosts-httpd.conf" >> /etc/httpd/conf.d/vhost.conf
+echo "Include ${vhost_httpd_conf}" >> /etc/httpd/conf.d/vhost.conf
 feedback h3 'Restart the web server'
 systemctl restart httpd
 
+
 # Create a DNS entry for the web host
 feedback h1 'Create a DNS entry on Cloudflare for this instance'
+# Cloudflare API secret
+cloudflare_zoneid=`aws ssm get-parameter --name "${common_parameters}/cloudflare/${hosting_domain}/zone_id" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption`
+cloudflare_api_token=`aws ssm get-parameter --name "${common_parameters}/cloudflare/${hosting_domain}/api_token" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption`
 curl -X POST "https://api.cloudflare.com/client/v4/zones/${cloudflare_zoneid}/dns_records" \
      -H "Authorization: Bearer ${cloudflare_api_token}" \
      -H "Content-Type: application/json" \
      --data '{"type":"A","name":"'"${instance_id}"'","content":"'"${public_ipv4}"'","ttl":1,"priority":10,"proxied":false}'
+# Clear the secret from memory
+unset cloudflare_api_token
 feedback h3 'Sleeping for 5 seconds to allow that DNS change to replicate'
 sleep 5
+
 
 # Install Let's Encrypt CertBot, requires EPEL
 feedback h1 'Install Lets Encrypt CertBot'
 install_pkg 'certbot python2-certbot-apache'
 # Create and install this instances certificates, these will be kept locally on EBS.  All vhost certificates need to be kept on EFS.
 feedback h2 'Get Lets Encrypt certificates for this server'
+# The contact email address for Lets Encrypt if a certificate problem comes up
+pki_email=`aws ssm get-parameter --name "${app_parameters}/pki_email" --query 'Parameter.Value' --output text --region ${aws_region}`
 mkdir --parents "${vhost_root}/_default_/log/${instance_id}.${hosting_domain}/letsencrypt"
 certbot certonly --domains "${instance_id}.${hosting_domain},web2.${hosting_domain}" --apache --non-interactive --agree-tos --email "${pki_email}" --no-eff-email --logs-dir "${vhost_root}/_default_/log/${instance_id}.${hosting_domain}/letsencrypt" --redirect --must-staple --staple-ocsp --hsts --uir
 # Customise the _default_ vhost config to include the new certificate created by certbot
@@ -518,17 +546,8 @@ then
   systemctl restart httpd
 fi
 # Link each of the vhosts listed in vhosts-httpd.conf to letsencrypt on this instance. So that all instances can renew all certificates as required
-# !! As this will need to run daily, should I just call on a script from the efs/script folder and avoid code duplication?
 feedback h3 'Include the vhosts Lets Encrypt config on this server'
-for vhost in ${vhost_list}
-do
-  if [ -f "${vhost_root}/${vhost}/conf/pki.conf" ]
-  then
-    ln -s "${vhost_root}/${vhost}/conf/pki.conf" "/etc/letsencrypt/renewal/${vhost}.conf"
-  else
-    feedback error "PKI config file missing for vhost ${vhost}"
-  fi
-done
+source "${efs_mount_point}/script/update_instance-vhosts_pki.sh"
 # Add a job to cron to run certbot regularly for renewals and revocations
 feedback h3 'Add a job to cron to run certbot daily'
 echo '#!/usr/bin/env bash' > /etc/cron.daily/certbot
@@ -538,6 +557,7 @@ echo '# Run Lets Encrypt Certbot to revoke and/or renew certiicates' >> /etc/cro
 echo 'certbot renew --no-self-upgrade' >> /etc/cron.daily/certbot
 chmod 0770 /etc/cron.daily/certbot
 systemctl restart crond
+
 
 # Thats all I wrote
 feedback title "Build script finished - https://${instance_id}.${hosting_domain}/wiki/"

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.1.1-20191122
+# Version:      0.1.2-20191123
 # File:         ec2_builder-launch.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -79,7 +79,7 @@ feedback title "Launch script started"
 feedback body "Script: ${0}"
 feedback body "Version: ${script_ver}"
 feedback body "Started: `date`"
-feedback h1 'Launching'
+feedback h2 'Launching'
 
 #======================================
 # Declare the constants
