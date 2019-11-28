@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.30-20191123
+# Version:      0.7.31-20191127
 # File:         ec2_builder-web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -18,7 +18,19 @@
 # Updates:
 #
 # Improvements to be made:
-#   * Need a shared user directory for PAM/users. So that file ownership on EFS is the same on all instances
+# * Do I get the tenancy, resource_environment, service_group etc from the AWS tags on the instance? Fewer values stored in the script & easily editable on the template. Also more reusable/accessible values as tags from both within the instance and from other AWS services
+#   * Need a shared user directory for end users (aka customers)
+# Create the end user accounts, these user accounts are used to login (e.g. using SSH) to manage a vhsot and will generally represent a real person.
+# !! end users is for customers that actually login via services (e.g. web portal/API etc) or shell (SSH/SCP etc)
+# Get the list of end users from the PKI/SSH keys in vhost/pki?
+# Would be even better if end users used OpenID or oAuth so no credenditals are stored here... Better UX as fewer passwords etc.
+# Not sure if I should/need to specify the UID for end users or leave it to fate
+# End users will need to be a member of the vhost's owner group e.g. mike would be a member of cakeit.nz & competitiveedge.nz which are the primary groups of the vhost owners... A user must be able to be a member of many vhosts with one user ID
+#useradd --uid ${end_user_uid} --gid ${end_user_gid} --home-dir "${vhost_root}/${vhost_dir}" --groups vhost_users,vhost_all,${vhost_dir} "${end_user}"
+# Must be able to add a user to a owners group to give them access and it sticks (not lost when scripts run to build/update instances). Ant remain consistent across all instances
+# Extend script to delete or disable existing users?  Maybe disable all users in vhost_users and then re-enable if directory still exists?
+# Do I even need to disable as no password? Depend on user ID & SSH/PKI token?
+#
 #   * Keep all temporal data with vhost e.g. php session and cache data. And configure PHP security features like chroot
 #   * Ensure that when Lets Encrypt renews a vhosts certificate that it stores the latest versions on EFS with the vhost, not on EBS
 #   * Configure a local DB, Aurora Serverless resume is too slow (~25s)
@@ -54,17 +66,6 @@
 #     - add/delete users, groups, and group members as required. Ideally users & groups would be on a directory service
 #   * Ideally this would use IAM users to support MFA and a user ID that could tie to other services e.g. a S3 bucket dedicated to a IAM user
 #
-
-# Create the end user accounts, these user accounts are used to login (e.g. using SSH) to manage a vhsot and will generally represent a real person.
-# !! end users is for customers that actually login via services (e.g. web portal/API etc) or shell (SSH/SCP etc)
-# Get the list of end users from the PKI/SSH keys in vhost/pki?
-# Would be even better if end users used OpenID or oAuth so no credenditals are stored here... Better UX as fewer passwords etc.
-# Not sure if I should/need to specify the UID for end users or leave it to fate
-# End users will need to be a member of the vhost's owner group e.g. mike would be a member of cakeit.nz & competitiveedge.nz which are the primary groups of the vhost owners... A user must be able to be a member of many vhosts with one user ID
-#useradd --uid ${end_user_uid} --gid ${end_user_gid} --home-dir "${vhost_root}/${vhost_dir}" --groups vhost_users,vhost_all,${vhost_dir} "${end_user}"
-# Must be able to add a user to a owners group to give them access and it sticks (not lost when scripts run to build/update instances). Ant remain consistent across all instances
-# Extend script to delete or disable existing users?  Maybe disable all users in vhost_users and then re-enable if directory still exists?
-# Do I even need to disable as no password? Depend on user ID & SSH/PKI token?
 
 
 #======================================
@@ -379,6 +380,11 @@ do
 done
 
 
+# Google Authenticator adds MFA capability to PAM - https://aws.amazon.com/blogs/startups/securing-ssh-to-amazon-ec2-linux-hosts/
+feedback h1 'Install Google Authenticator to support MFA'
+install_pkg 'google-authenticator'
+
+
 # Default config for AWS CLI tools
 feedback h1 'Configure AWS CLI for the root user'
 aws_cli_output=`aws ssm get-parameter --name "${app_parameters}/awscli/aws_cli_output" --query 'Parameter.Value' --output text --region ${aws_region}`
@@ -443,6 +449,47 @@ echo '; Include the vhosts stored on the EFS volume' > /etc/php-fpm.d/vhost.conf
 echo "include=${efs_mount_point}/conf/vhosts-php-fpm.conf" >> /etc/php-fpm.d/vhost.conf
 feedback h3 'Restart PHP-FPM to recognise the additional PHP modules and config'
 systemctl restart php-fpm
+
+
+# Install Speedtest
+feedback h1 'Install Ookla Speedtest'
+feedback h3 'Ookla server'
+mkdir --parents /opt/ookla/server
+cd /opt/ookla/server/
+wget http://install.speedtest.net/ooklaserver/stable/OoklaServer.tgz
+tar -xzvf OoklaServer.tgz OoklaServer-linux64.tgz
+rm --force OoklaServer.tgz
+tar -xzvf OoklaServer-linux64.tgz
+rm --force OoklaServer-linux64.tgz
+chown root:root /opt/ookla/server/*
+# Customise the config
+sed -i 's|^logging\.loggers\.app\.|#logging.loggers.app.|g' /opt/ookla/server/OoklaServer.properties.default
+echo 'logging.loggers.app.name = Application' >> /opt/ookla/server/OoklaServer.properties.default
+echo 'logging.loggers.app.channel.class = FileChannel' >> /opt/ookla/server/OoklaServer.properties.default
+echo 'logging.loggers.app.channel.pattern = %Y-%m-%d %H:%M:%S [%P - %I] [%p] %t' >> /opt/ookla/server/OoklaServer.properties.default
+echo 'logging.loggers.app.channel.path = /var/log/ooklaserver' >> /opt/ookla/server/OoklaServer.properties.default
+echo 'logging.loggers.app.level = information' >> /opt/ookla/server/OoklaServer.properties.default
+# Configure a daemon for systemd
+echo '[Unit]' > /opt/ookla/server/ookla-server.service
+echo 'Description=ookla-server' >> /opt/ookla/server/ookla-server.service
+echo 'After=network-online.target' >> /opt/ookla/server/ookla-server.service
+echo '' >> /opt/ookla/server/ookla-server.service
+echo '[Service]' >> /opt/ookla/server/ookla-server.service
+echo 'Type=simple' >> /opt/ookla/server/ookla-server.service
+echo 'WorkingDirectory=/opt/ookla/server/' >> /opt/ookla/server/ookla-server.service
+echo 'ExecStart=/opt/ookla/server/OoklaServer' >> /opt/ookla/server/ookla-server.service
+echo 'KillMode=process' >> /opt/ookla/server/ookla-server.service
+echo 'Restart=on-failure' >> /opt/ookla/server/ookla-server.service
+echo 'RestartSec=15min' >> /opt/ookla/server/ookla-server.service
+echo '' >> /opt/ookla/server/ookla-server.service
+echo '[Install]' >> /opt/ookla/server/ookla-server.service
+echo 'WantedBy=multi-user.target' >> /opt/ookla/server/ookla-server.service
+ln -s /opt/ookla/server/ookla-server.service /etc/systemd/system/ookla-server.service
+systemctl daemon-reload
+feedback h3 'Ookla CLI'
+wget https://bintray.com/ookla/rhel/rpm -O bintray-ookla-rhel.repo
+mv bintray-ookla-rhel.repo /etc/yum.repos.d/
+install_pkg 'speedtest'
 
 
 # Install Ghost Script, a PostScript interpreter and renderer that is used by WordPress for PDFs
