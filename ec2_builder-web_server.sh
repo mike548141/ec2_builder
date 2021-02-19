@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.35-20210219
+# Version:      0.7.36-20210219
 # File:         ec2_builder-web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -578,9 +578,16 @@ sed -i "s|i-instanceid\.cakeit\.nz|${instance_id}.${hosting_domain}|g" /etc/http
 feedback h3 'Include the vhost config from the EFS volume'
 echo '# Publish the vhosts stored on the EFS volume' > /etc/httpd/conf.d/vhost.conf
 echo "Include ${vhost_httpd_conf}" >> /etc/httpd/conf.d/vhost.conf
+# The vhosts httpd config points to this conf file, it won't exist yet since LetsEncrypt has not run yet. This creates an empty file so that httpd can load.
+if [ ! -f '/etc/letsencrypt/options-ssl-apache.conf' ]
+then
+  feedback h3 'Create an empty options-ssl-apache.conf because the vhosts depend upon it'
+  touch '/etc/letsencrypt/options-ssl-apache.conf'
+fi
 feedback h3 'Restart the web server'
 systemctl restart httpd
-
+feedback h3 'Web server status'
+systemctl -l status httpd.service
 
 # Create a DNS entry for the web host
 feedback h1 'Create a DNS entry on Cloudflare for this instance'
