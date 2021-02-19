@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.31-20191127
+# Version:      0.7.34-20210219
 # File:         ec2_builder-web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -31,6 +31,7 @@
 # Extend script to delete or disable existing users?  Maybe disable all users in vhost_users and then re-enable if directory still exists?
 # Do I even need to disable as no password? Depend on user ID & SSH/PKI token?
 #
+#   * Do I use PGP instead of PKI to verify end users? e.g. yum install monkeysphere
 #   * Keep all temporal data with vhost e.g. php session and cache data. And configure PHP security features like chroot
 #   * Ensure that when Lets Encrypt renews a vhosts certificate that it stores the latest versions on EFS with the vhost, not on EBS
 #   * Configure a local DB, Aurora Serverless resume is too slow (~25s)
@@ -216,28 +217,34 @@ fi
 #======================================
 # Declare the constants
 #--------------------------------------
-# Define the key constants to decide what we are building
-tenancy='cakeIT'
-resource_environment='prod'
-service_group='web.cakeit.nz'
+feedback h1 'Setting up'
+# The name used in AWS Parameter store to define this script as an app
 app='ec2_builder-web_server.sh'
 
-# Define the parameter store structure
-common_parameters="/${tenancy}/${resource_environment}/common"
-app_parameters="/${tenancy}/${resource_environment}/${service_group}/${app}"
-
-# Get the instance name
+feedback h3 'Collect local metadata'
+# Get this instances name
 instance_id=`ec2-metadata --instance-id | cut -c 14-`
 
-# Configuration parameters are held in AWS Systems Manager Parameter Store, retrieving these using the AWC CLI. Permissions are granted to do this using a IAM role assigned to the instance
-feedback h1 'Collecting info from AWS Systems Manager Parameter Store'
+# Use the AWS region where the instance is placed, later this will be reset by the AWS Parameter Store
+aws_region=`ec2-metadata --availability-zone | cut -c 12-20`
+
 # Delete the AWS credentials file so that the AWS CLI uses the instances profile/role permissions
 if [ -f '/root/.aws/credentials' ]
 then
   rm --force '/root/.aws/credentials'
 fi
-# Assume the instances placement is the same region where the AWS SSM Parameter Store is found
-aws_region=`ec2-metadata --availability-zone | cut -c 12-20`
+
+# Collect the instances tags to decide what we are building
+feedback h3 'Collect instance tags'
+tenancy=`aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == 'tenancy'].Value" --output text --region ${aws_region}`
+resource_environment=`aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == 'resource_environment'].Value" --output text --region ${aws_region}`
+service_group=`aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == 'service_group'].Value" --output text --region ${aws_region}`
+
+# Configuration parameters are held in AWS Systems Manager Parameter Store, retrieving these using the AWC CLI. Permissions are granted to do this using a IAM role assigned to the instance
+feedback h3 'Collect info from AWS Systems Manager Parameter Store'
+# Define the parameter store structure
+common_parameters="/${tenancy}/${resource_environment}/common"
+app_parameters="/${tenancy}/${resource_environment}/${service_group}/${app}"
 # Connect to AWS SSM Parameter Store to see what region we should be using
 aws_region=`aws ssm get-parameter --name "${app_parameters}/awscli/aws_region" --query 'Parameter.Value' --output text --region ${aws_region}`
 
@@ -399,8 +406,8 @@ feedback h3 'Configure FUSE'
 sed -i 's|^# user_allow_other$|user_allow_other|' /etc/fuse.conf
 feedback h3 'Configure AWS CLI credentials for the root user, S3FS uses the same file'
 # This AWS API key and secret is attached to the IAM user ec2.web.cakeit.nz
-aws_access_key_id=`aws ssm get-parameter --name "${app_parameters}/awscli/aws_access_key_id" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption`
-aws_secret_access_key=`aws ssm get-parameter --name "${app_parameters}/awscli/aws_secret_access_key" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption`
+aws_access_key_id=`aws ssm get-parameter --name "${common_parameters}/awscli/aws_access_key_id" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption`
+aws_secret_access_key=`aws ssm get-parameter --name "${common_parameters}/awscli/aws_secret_access_key" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption`
 aws configure set aws_access_key_id ${aws_access_key_id}
 aws configure set aws_secret_access_key ${aws_secret_access_key}
 # Clear the secret from memory

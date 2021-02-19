@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.1.2-20191123
+# Version:      0.1.3-20210219
 # File:         ec2_builder-launch.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -75,11 +75,11 @@ feedback () {
 # Say hello
 #--------------------------------------
 script_ver=`grep '^# Version:[ \t]*' ${0} | sed 's|# Version:[ \t]*||'`
-feedback title "Launch script started"
+feedback title "ec2_builder launch script"
 feedback body "Script: ${0}"
 feedback body "Version: ${script_ver}"
 feedback body "Started: `date`"
-feedback h2 'Launching'
+feedback h2 'Preparing'
 
 #======================================
 # Declare the constants
@@ -109,8 +109,9 @@ feedback body 'Download the build script'
 cd /root
 curl -H "Authorization: token ${github_api_token}" \
      -H 'Accept: application/vnd.github.v4.raw' \
-     -O -L "https://raw.githubusercontent.com/mike548141/ec2_builder/master/${app}"
-chmod 0700 "/root/${app}"
+     -O \
+     -L "https://raw.githubusercontent.com/mike548141/ec2_builder/master/${app}"
+chmod 0740 "/root/${app}"
 
 feedback h3 'Execute the build script'
 "/root/${app}" go
