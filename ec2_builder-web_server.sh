@@ -375,7 +375,7 @@ source "${efs_mount_point}/script/common_variables.sh"
 # Create a directory for this instances log files on the EFS volume
 feedback h1 'Create a space for this instances log files on the EFS volume'
 mkdir --parents "${vhost_root}/_default_/log/${instance_id}.${hosting_domain}"
-### instance logs should be on the local host not EFS
+## Probably remove this section above, should not be used anymore
 
 
 # Create users and groups
@@ -613,8 +613,8 @@ install_pkg 'certbot python2-certbot-apache'
 feedback h2 'Get Lets Encrypt certificates for this server'
 # The contact email address for Lets Encrypt if a certificate problem comes up
 pki_email=`aws ssm get-parameter --name "${app_parameters}/pki_email" --query 'Parameter.Value' --output text --region ${aws_region}`
-mkdir --parents "${vhost_root}/_default_/log/${instance_id}.${hosting_domain}/letsencrypt"
-certbot certonly --domains "${instance_id}.${hosting_domain},web2.${hosting_domain}" --apache --non-interactive --agree-tos --email "${pki_email}" --no-eff-email --logs-dir "${vhost_root}/_default_/log/${instance_id}.${hosting_domain}/letsencrypt" --redirect --must-staple --staple-ocsp --hsts --uir
+mkdir --parents "/var/log/letsencrypt"
+certbot certonly --domains "${instance_id}.${hosting_domain},web2.${hosting_domain}" --apache --non-interactive --agree-tos --email "${pki_email}" --no-eff-email --logs-dir "/var/log/letsencrypt" --redirect --must-staple --staple-ocsp --hsts --uir
 
 
 # Customise the _default_ vhost config to include the new certificate created by certbot
