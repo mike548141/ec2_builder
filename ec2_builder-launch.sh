@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.1.4-20210219
+# Version:      0.1.5-20210219
 # File:         ec2_builder-launch.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -113,7 +113,7 @@ curl -H "Authorization: token ${github_api_token}" \
      -f \
      -L \
      "https://raw.githubusercontent.com/mike548141/ec2_builder/master/${app}"
-local exit_code=${?}
+exit_code=${?}
 if [ ${exit_code} -ne 0 ]
 then
   feedback error "Failed to download the build script, curl error ${exit_code}"

@@ -374,6 +374,7 @@ source "${efs_mount_point}/script/common_variables.sh"
 # Create a directory for this instances log files on the EFS volume
 feedback h1 'Create a space for this instances log files on the EFS volume'
 mkdir --parents "${vhost_root}/_default_/log/${instance_id}.${hosting_domain}"
+### instance logs should be on the local host not EFS
 
 
 # Create users and groups
