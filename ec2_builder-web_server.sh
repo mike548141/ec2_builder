@@ -348,6 +348,7 @@ sudo yum-config-manager --add-repo https://pkg.osquery.io/rpm/osquery-s3-rpm.rep
 sudo yum-config-manager --enable osquery-s3-rpm
 install_pkg 'osquery'
 
+
 # Install AWS EFS helper and mount the EFS volume for vhost data
 feedback h1 'Install AWS EFS helper'
 install_pkg 'amazon-efs-utils'
@@ -589,6 +590,7 @@ systemctl restart httpd
 feedback h3 'Web server status'
 systemctl -l status httpd.service
 
+
 # Create a DNS entry for the web host
 feedback h1 'Create a DNS entry on Cloudflare for this instance'
 # Cloudflare API secret
@@ -613,6 +615,7 @@ feedback h2 'Get Lets Encrypt certificates for this server'
 pki_email=`aws ssm get-parameter --name "${app_parameters}/pki_email" --query 'Parameter.Value' --output text --region ${aws_region}`
 mkdir --parents "${vhost_root}/_default_/log/${instance_id}.${hosting_domain}/letsencrypt"
 certbot certonly --domains "${instance_id}.${hosting_domain},web2.${hosting_domain}" --apache --non-interactive --agree-tos --email "${pki_email}" --no-eff-email --logs-dir "${vhost_root}/_default_/log/${instance_id}.${hosting_domain}/letsencrypt" --redirect --must-staple --staple-ocsp --hsts --uir
+
 
 # Customise the _default_ vhost config to include the new certificate created by certbot
 if [[ -f "/etc/letsencrypt/live/${instance_id}.${hosting_domain}/fullchain.pem" && -f "/etc/letsencrypt/live/${instance_id}.${hosting_domain}/privkey.pem" ]]
