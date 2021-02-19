@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.36-20210219
+# Version:      0.7.37-20210219
 # File:         ec2_builder-web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -18,10 +18,10 @@
 # Updates:
 #
 # Improvements to be made:
-# * Should I switch to ubuntu, feels more capable than AL2 and keeps it inline with what I use on-prem
+# * Should I switch to ubuntu? Ubuntu feels more capable than AL2 and keeps it inline with what I use on-prem
 # * Do I get the tenancy, resource_environment, service_group etc from the AWS tags on the instance? Fewer values stored in the script & easily editable on the template. Also more reusable/accessible values as tags from both within the instance and from other AWS services
 #   * Need a shared user directory for end users (aka customers)
-# Create the end user accounts, these user accounts are used to login (e.g. using SSH) to manage a vhsot and will generally represent a real person.
+# Create the end user accounts, these user accounts are used to login (e.g. using SSH) to manage a vhost and will generally represent a real person.
 ## end users is for customers that actually login via services (e.g. web portal/API etc) or shell (SSH/SCP etc)
 # Get the list of end users from the PKI/SSH keys in vhost/pki?
 # Would be even better if end users used OpenID or oAuth so no credenditals are stored here... Better UX as fewer passwords etc.
@@ -337,7 +337,7 @@ feedback h2 'Install tripwire'
 install_pkg 'tripwire'
 feedback h2 'Install selinux'
 install_pkg 'policycoreutils selinux-policy-targeted policycoreutils-python'
-##feedback he 'Enable selinux'
+##feedback h3 'Enable selinux'
 feedback h2 'Install linux system auditing'
 install_pkg 'audit audispd-plugins'
 feedback h2 'Install osquery'
@@ -583,6 +583,7 @@ echo "Include ${vhost_httpd_conf}" >> /etc/httpd/conf.d/vhost.conf
 if [ ! -f '/etc/letsencrypt/options-ssl-apache.conf' ]
 then
   feedback h3 'Create an empty options-ssl-apache.conf because the vhosts depend upon it'
+  mkdir '/etc/letsencrypt'
   touch '/etc/letsencrypt/options-ssl-apache.conf'
 fi
 feedback h3 'Restart the web server'
