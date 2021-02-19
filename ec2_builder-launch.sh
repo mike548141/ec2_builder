@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.1.3-20210219
+# Version:      0.1.4-20210219
 # File:         ec2_builder-launch.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -110,8 +110,16 @@ cd /root
 curl -H "Authorization: token ${github_api_token}" \
      -H 'Accept: application/vnd.github.v4.raw' \
      -O \
-     -L "https://raw.githubusercontent.com/mike548141/ec2_builder/master/${app}"
-chmod 0740 "/root/${app}"
-
-feedback h3 'Execute the build script'
-"/root/${app}" go
+     -f \
+     -L \
+     "https://raw.githubusercontent.com/mike548141/ec2_builder/master/${app}"
+local exit_code=${?}
+if [ ${exit_code} -ne 0 ]
+then
+  feedback error "Failed to download the build script, curl error ${exit_code}"
+else
+  chmod 0740 "/root/${app}"
+  
+  feedback h3 'Execute the build script'
+  "/root/${app}" go
+fi

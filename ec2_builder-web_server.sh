@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.34-20210219
+# Version:      0.7.35-20210219
 # File:         ec2_builder-web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -18,10 +18,11 @@
 # Updates:
 #
 # Improvements to be made:
+# * Should I switch to ubuntu, feels more capable than AL2 and keeps it inline with what I use on-prem
 # * Do I get the tenancy, resource_environment, service_group etc from the AWS tags on the instance? Fewer values stored in the script & easily editable on the template. Also more reusable/accessible values as tags from both within the instance and from other AWS services
 #   * Need a shared user directory for end users (aka customers)
 # Create the end user accounts, these user accounts are used to login (e.g. using SSH) to manage a vhsot and will generally represent a real person.
-# !! end users is for customers that actually login via services (e.g. web portal/API etc) or shell (SSH/SCP etc)
+## end users is for customers that actually login via services (e.g. web portal/API etc) or shell (SSH/SCP etc)
 # Get the list of end users from the PKI/SSH keys in vhost/pki?
 # Would be even better if end users used OpenID or oAuth so no credenditals are stored here... Better UX as fewer passwords etc.
 # Not sure if I should/need to specify the UID for end users or leave it to fate
@@ -326,10 +327,26 @@ install_pkg 'amazon-ssm-agent'
 
 
 # Install security apps, requires EPEL
-feedback h1 'Install host security apps'
+feedback h1 'Install security apps to protect the host'
 #install_pkg 'fail2ban firewalld rkhunter selinux-policy tripwire'
-install_pkg 'rkhunter tripwire'
-
+feedback h2 'Install fail2ban'
+install_pkg 'fail2ban'
+feedback h2 'Install root kit hunter'
+install_pkg 'rkhunter'
+feedback h2 'Install tripwire'
+install_pkg 'tripwire'
+feedback h2 'Install selinux'
+install_pkg 'policycoreutils selinux-policy-targeted policycoreutils-python'
+##feedback he 'Enable selinux'
+feedback h2 'Install linux system auditing'
+install_pkg 'audit audispd-plugins'
+feedback h2 'Install osquery'
+feedback h3 'Add the osquery repo and trust the GPG key'
+curl -L https://pkg.osquery.io/rpm/GPG | sudo tee /etc/pki/rpm-gpg/RPM-GPG-KEY-osquery
+rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-osquery
+sudo yum-config-manager --add-repo https://pkg.osquery.io/rpm/osquery-s3-rpm.repo
+sudo yum-config-manager --enable osquery-s3-rpm
+install_pkg 'osquery'
 
 # Install AWS EFS helper and mount the EFS volume for vhost data
 feedback h1 'Install AWS EFS helper'
@@ -464,10 +481,10 @@ feedback h3 'Ookla server'
 mkdir --parents /opt/ookla/server
 cd /opt/ookla/server/
 wget http://install.speedtest.net/ooklaserver/stable/OoklaServer.tgz
-tar -xzvf OoklaServer.tgz OoklaServer-linux64.tgz
+tar -xzvf OoklaServer.tgz OoklaServer-linux64.tar
 rm --force OoklaServer.tgz
-tar -xzvf OoklaServer-linux64.tgz
-rm --force OoklaServer-linux64.tgz
+tar -xzvf OoklaServer-linux64.tar
+rm --force OoklaServer-linux64.tar
 chown root:root /opt/ookla/server/*
 # Customise the config
 sed -i 's|^logging\.loggers\.app\.|#logging.loggers.app.|g' /opt/ookla/server/OoklaServer.properties.default
@@ -518,7 +535,7 @@ install_pkg 'mariadb'
 # This section will only be used for standalone installs. Eventually this will either use a dedicated EC2 running MariaDB or AWS RDS Aurora
 feedback h1 'Install the MariaDB server'
 install_pkg 'mariadb-server'
-# !!
+###
 feedback error 'Not starting the database server. Code disabled as its causing yum issues (DB corruption, failed install) for the build script'
 #feedback h3 'Sleep for 5 seconds as the database server wont start immediately after install'
 #sleep 5
@@ -588,6 +605,7 @@ feedback h2 'Get Lets Encrypt certificates for this server'
 pki_email=`aws ssm get-parameter --name "${app_parameters}/pki_email" --query 'Parameter.Value' --output text --region ${aws_region}`
 mkdir --parents "${vhost_root}/_default_/log/${instance_id}.${hosting_domain}/letsencrypt"
 certbot certonly --domains "${instance_id}.${hosting_domain},web2.${hosting_domain}" --apache --non-interactive --agree-tos --email "${pki_email}" --no-eff-email --logs-dir "${vhost_root}/_default_/log/${instance_id}.${hosting_domain}/letsencrypt" --redirect --must-staple --staple-ocsp --hsts --uir
+
 # Customise the _default_ vhost config to include the new certificate created by certbot
 if [[ -f "/etc/letsencrypt/live/${instance_id}.${hosting_domain}/fullchain.pem" && -f "/etc/letsencrypt/live/${instance_id}.${hosting_domain}/privkey.pem" ]]
 then
