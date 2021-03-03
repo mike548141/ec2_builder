@@ -161,7 +161,6 @@ feedback () {
 
 # Install an app using yum
 install_pkg () {
-####
   if [ -f '/usr/bin/yum' ]
   then
     check_pid_lock 'yum'
@@ -247,8 +246,18 @@ feedback h3 'Collect local metadata'
 # Get this instances name
 instance_id=`ec2-metadata --instance-id | cut -c 14-`
 
-# Use the AWS region where the instance is placed, later this will be reset by the AWS Parameter Store
-aws_region=`ec2-metadata --availability-zone | cut -c 12-20`
+# The initial AWS region setting using the instances placement so that we can connect to the AWS SSM parameter store
+if [ -f '/usr/bin/ec2metadata' ]
+then
+  aws_region=`ec2metadata --availability-zone | cut -c 1-9`
+elif [ -f '/usr/bin/ec2-metadata' ]
+then
+  aws_region=`ec2-metadata --availability-zone | cut -c 12-20`
+else
+  feedback error "Can't find ec2metadata or ec2-metadata to discover the AWS region that this instance is running in, assuming us-east-1"
+  aws_region='us-east-1'
+fi
+feedback body "Using AWS parameter store ${common_parameters} in the ${aws_region} region"
 
 # Delete the AWS credentials file so that the AWS CLI uses the instances profile/role permissions
 if [ -f '/root/.aws/credentials' ]
@@ -457,7 +466,7 @@ feedback h3 'Configure AWS CLI credentials for the root user, S3FS uses the same
 aws_access_key_id=`aws ssm get-parameter --name "${common_parameters}/awscli/aws_access_key_id" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption`
 aws_access_key_secret=`aws ssm get-parameter --name "${common_parameters}/awscli/aws_access_key_secret" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption`
 aws configure set aws_access_key_id ${aws_access_key_id}
-aws configure set aws_access_key_secret ${aws_access_key_secret}
+aws configure set aws_secret_access_key ${aws_access_key_secret}
 # Clear the secret from memory
 unset aws_access_key_id
 unset aws_access_key_secret

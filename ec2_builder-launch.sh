@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.2.0-20210303
+# Version:      0.2.2-20210304
 # File:         ec2_builder-launch.sh
 # License:      GNU GPL v3
 # Language:     bash
 # Source:       https://github.com/mike548141/ec2_builder
 #
 # Description:
-#  This script is a bridge between an AWS EC2 Launch Template and the script that configures the instance for its role, developed on an Amazon Linux 2 AMI using a t3a.nano instance.
+#  This script is a bridge between an AWS EC2 Launch Template and the script that configures the instance for its role, developed on an Amazon Linux 2 AMI and extended to support ubuntu 20.04 LTS AMI; using a t3a.nano instance.
 #
 # References:
 #
@@ -75,41 +75,27 @@ feedback () {
 #======================================
 # Say hello
 #--------------------------------------
+feedback title "ec2_builder launch script"
 script_ver=`grep '^# Version:[ \t]*' ${0} | sed 's|# Version:[ \t]*||'`
 hostos=`grep 'PRETTY_NAME=' /etc/os-release | sed 's|^PRETTY_NAME="||; s|"$||;'`
-feedback title "ec2_builder launch script"
 feedback body "Script: ${0}"
 feedback body "Script version: ${script_ver}"
 feedback body "Host OS: ${hostos}"
 feedback body "Shell: `readlink /proc/$$/exe`"
 feedback body "Running as user: `whoami`"
 feedback body "Started: `date`"
-feedback h2 'Preparing'
 
 #======================================
 # Declare the constants
 #--------------------------------------
-# These are just to download the build script, the build script defines its own tenancy, environment, and build definition
-feedback body 'Setting the constants for the launch stage'
-tenancy='cakeIT'
-resource_environment='prod'
-app='ec2_builder-web_server.sh'
-# Define the parameter store structure
-common_parameters="/${tenancy}/${resource_environment}/common"
 
-# The initial AWS region setting using the instances placement so that we can connect to the AWS SSM parameter store
-if [ -f '/usr/bin/ec2metadata' ]
-then
-  aws_region=`ec2metadata --availability-zone | cut -c 1-9`
-elif [ -f '/usr/bin/ec2-metadata' ]
-then
-  aws_region=`ec2-metadata --availability-zone | cut -c 12-20`
-else
-  feedback error "Can't find ec2metadata or ec2-metadata to discover the AWS region that this instance is running in, assuming us-east-1"
-  aws_region='us-east-1'
-fi
-feedback body "Using AWS parameter store ${common_parameters} in the ${aws_region} region"
+#======================================
+# Declare the variables
+#--------------------------------------
 
+#======================================
+# Lets get into it
+#--------------------------------------
 # AWS CLI
 if [ ! -f '/usr/bin/aws' ] && [ -f '/usr/bin/apt' ]
 then
@@ -119,37 +105,61 @@ then
   apt --assume-yes install awscli
 fi
 
+feedback h1 'Getting the information needed to launch'
+
+feedback body 'Get the EC2 instance ID and AWS region'
+# The initial AWS region setting using the instances placement so that we can connect to the AWS SSM parameter store
+if [ -f '/usr/bin/ec2metadata' ]
+then
+  instance_id=`ec2metadata --instance-id`
+  aws_region=`ec2metadata --availability-zone | cut -c 1-9`
+elif [ -f '/usr/bin/ec2-metadata' ]
+then
+  instance_id=`ec2-metadata --instance-id | cut -c 14-`
+  aws_region=`ec2-metadata --availability-zone | cut -c 12-20`
+else
+  feedback error "Can't find ec2metadata or ec2-metadata, assuming us-east-1 and no instance ID"
+  aws_region='us-east-1'
+fi
+
+# These are just to download the build script, the build script defines its own tenancy, environment, and build definition
+feedback body 'Get the tenancy and environment from the instance tags'
+tenancy=`aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == 'tenancy'].Value" --output text --region ${aws_region}`
+resource_environment=`aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == 'resource_environment'].Value" --output text --region ${aws_region}`
+# Define the parameter store structure
+common_parameters="/${tenancy}/${resource_environment}/common"
+feedback body "Using AWS parameter store ${common_parameters} in the ${aws_region} region for instance ${instance_id}"
+
+# Build script name
+feedback body 'Get the name of the build app'
+build_app=`aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == 'build_app'].Value" --output text --region ${aws_region}`
+
 # GitHub API secret
 if [ -f '/usr/bin/aws' ]
 then
-  github_api_token=`aws ssm get-parameter --name "${common_parameters}/github/api_secret" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption`
+  github_api_secret=`aws ssm get-parameter --name "${common_parameters}/github/api_secret" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption`
+else
+  feedback error 'awscli missing'
 fi
-if [ "${github_api_token}" == "" ]
+if [ "${github_api_secret}" == "" ]
 then
   feedback error 'Failed to retrieve the GitHub API secret'
 fi
 
-#======================================
-# Declare the variables
-#--------------------------------------
-
-#======================================
-# Lets get into it
-#--------------------------------------
 feedback h1 'Download the build script'
 cd /root
-curl -H "Authorization: token ${github_api_token}" \
+curl -H "Authorization: token ${github_api_secret}" \
      -H 'Accept: application/vnd.github.v4.raw' \
      -O \
      -f \
      -L \
-     "https://raw.githubusercontent.com/mike548141/ec2_builder/master/${app}"
+     "https://raw.githubusercontent.com/mike548141/ec2_builder/master/${build_app}"
 exit_code=${?}
 if [ ${exit_code} -ne 0 ]
 then
-  feedback error "Failed to download the build script, curl error ${exit_code}"
+  feedback error "Error downloading the build script (${build_app}), curl error ${exit_code}"
 else
-  chmod 0740 "/root/${app}"
+  chmod 0740 "/root/${build_app}"
   feedback h2 'Execute the build script'
-  "/root/${app}" go
+  "/root/${build_app}" go
 fi
