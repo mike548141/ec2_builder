@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.39-20210303
+# Version:      0.7.41-20210303
 # File:         ec2_builder-web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -161,32 +161,47 @@ feedback () {
 
 # Install an app using yum
 install_pkg () {
-  check_pid_lock 'yum'
-  yum install --assumeyes ${1}
-  local exit_code=${?}
-  if [ ${exit_code} -ne 0 ]
+####
+  if [ -f '/usr/bin/yum' ]
   then
-    feedback error "yum install exit code ${exit_code}"
-    feedback body 'Retrying install in 60 seconds'
-    sleep 60
-    feedback h3 'Running yum-complete-transaction -y'
-    yum-complete-transaction -y
-    exit_code=${?}
-    feedback body "Exit code ${exit_code}"
-    feedback h3 'Running yum history redo last'
-    yum history redo last
-    exit_code=${?}
-    feedback body "Exit code ${exit_code}"
-    feedback h3 'Running yum clean all'
-    yum clean all
-    exit_code=${?}
-    feedback body "Exit code ${exit_code}"
-    feedback h3 "Running yum install --assumeyes ${1}"
+    check_pid_lock 'yum'
     yum install --assumeyes ${1}
-    exit_code=${?}
-    feedback body "Exit code ${exit_code}"
+    local exit_code=${?}
+    if [ ${exit_code} -ne 0 ]
+    then
+      feedback error "yum install exit code ${exit_code}"
+      feedback body 'Retrying install in 60 seconds'
+      sleep 60
+      feedback h3 'Running yum-complete-transaction -y'
+      yum-complete-transaction -y
+      exit_code=${?}
+      feedback body "Exit code ${exit_code}"
+      feedback h3 'Running yum history redo last'
+      yum history redo last
+      exit_code=${?}
+      feedback body "Exit code ${exit_code}"
+      feedback h3 'Running yum clean all'
+      yum clean all
+      exit_code=${?}
+      feedback body "Exit code ${exit_code}"
+      feedback h3 "Running yum install --assumeyes ${1}"
+      yum install --assumeyes ${1}
+      exit_code=${?}
+      feedback body "Exit code ${exit_code}"
+    fi
+    check_pid_lock 'yum'
+  elif [ -f '/usr/bin/apt' ]
+  then
+    check_pid_lock 'apt'
+    apt --assumeyes install ${1}
+    local exit_code=${?}
+    if [ ${exit_code} -ne 0 ]
+    then
+      feedback error "apt install exit code ${exit_code}"
+    fi
+  else
+    feedback error 'Package manager not found'
   fi
-  check_pid_lock 'yum'
 }
 
 
@@ -203,9 +218,13 @@ manage_ale () {
 if [ "${1}" == "go" ]
 then
   script_ver=`grep '^# Version:[ \t]*' ${0} | sed 's|# Version:[ \t]*||'`
+  hostos=`grep 'PRETTY_NAME=' /etc/os-release | sed 's|^PRETTY_NAME="||; s|"$||;'`
   feedback title "Build script started"
   feedback body "Script: ${0}"
-  feedback body "Version: ${script_ver}"
+  feedback body "Script version: ${script_ver}"
+  feedback body "Host OS: ${hostos}"
+  feedback body "Shell: `readlink /proc/$$/exe`"
+  feedback body "Running as user: `whoami`"
   feedback body "Started: `date`"
 else
   feedback error 'Exiting because you did not use the special word'
@@ -214,7 +233,6 @@ else
   echo ''
   exit 1
 fi
-
 
 #### ec2-metadata issues same as launch script
 
@@ -622,6 +640,7 @@ curl -X POST "https://api.cloudflare.com/client/v4/zones/${cloudflare_zoneid}/dn
      -H "Authorization: Bearer ${cloudflare_api_token}" \
      -H "Content-Type: application/json" \
      --data '{"type":"A","name":"'"${instance_id}"'","content":"'"${public_ipv4}"'","ttl":1,"priority":10,"proxied":false}'
+### Create AAAA record
 # Clear the secret from memory
 unset cloudflare_api_token
 feedback h3 'Sleeping for 5 seconds to allow that DNS change to replicate'
