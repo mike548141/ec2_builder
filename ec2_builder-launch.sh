@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.1.5-20210219
+# Version:      0.2.0-20210303
 # File:         ec2_builder-launch.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -61,6 +61,7 @@ feedback () {
     echo ''
     echo '********************************************************************************'
     echo " *** Error: ${2}"
+    echo ''
   else
     echo ''
     echo "*** Error in the feedback function using the following parameters"
@@ -75,9 +76,13 @@ feedback () {
 # Say hello
 #--------------------------------------
 script_ver=`grep '^# Version:[ \t]*' ${0} | sed 's|# Version:[ \t]*||'`
+hostos=`grep 'PRETTY_NAME=' /etc/os-release | sed 's|^PRETTY_NAME="||; s|"$||;'`
 feedback title "ec2_builder launch script"
 feedback body "Script: ${0}"
-feedback body "Version: ${script_ver}"
+feedback body "Script version: ${script_ver}"
+feedback body "Host OS: ${hostos}"
+feedback body "Shell: `readlink /proc/$$/exe`"
+feedback body "Running as user: `whoami`"
 feedback body "Started: `date`"
 feedback h2 'Preparing'
 
@@ -89,14 +94,40 @@ feedback body 'Setting the constants for the launch stage'
 tenancy='cakeIT'
 resource_environment='prod'
 app='ec2_builder-web_server.sh'
-
 # Define the parameter store structure
 common_parameters="/${tenancy}/${resource_environment}/common"
+
 # The initial AWS region setting using the instances placement so that we can connect to the AWS SSM parameter store
-aws_region=`ec2-metadata --availability-zone | cut -c 12-20`
+if [ -f '/usr/bin/ec2metadata' ]
+then
+  aws_region=`ec2metadata --availability-zone | cut -c 1-9`
+elif [ -f '/usr/bin/ec2-metadata' ]
+then
+  aws_region=`ec2-metadata --availability-zone | cut -c 12-20`
+else
+  feedback error "Can't find ec2metadata or ec2-metadata to discover the AWS region that this instance is running in, assuming us-east-1"
+  aws_region='us-east-1'
+fi
+feedback body "Using AWS parameter store ${common_parameters} in the ${aws_region} region"
+
+# AWS CLI
+if [ ! -f '/usr/bin/aws' ] && [ -f '/usr/bin/apt' ]
+then
+  # Assume AWS CLI is not installed and we have the apt package manager. Amazon Linux 2 includes AWS CLI by default but Ubuntu does not
+  feedback h1 'Installing the awscli package'
+  apt update
+  apt --assume-yes install awscli
+fi
 
 # GitHub API secret
-github_api_token=`aws ssm get-parameter --name "${common_parameters}/github/api_token" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption`
+if [ -f '/usr/bin/aws' ]
+then
+  github_api_token=`aws ssm get-parameter --name "${common_parameters}/github/api_secret" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption`
+fi
+if [ "${github_api_token}" == "" ]
+then
+  feedback error 'Failed to retrieve the GitHub API secret'
+fi
 
 #======================================
 # Declare the variables
@@ -105,7 +136,7 @@ github_api_token=`aws ssm get-parameter --name "${common_parameters}/github/api_
 #======================================
 # Lets get into it
 #--------------------------------------
-feedback body 'Download the build script'
+feedback h1 'Download the build script'
 cd /root
 curl -H "Authorization: token ${github_api_token}" \
      -H 'Accept: application/vnd.github.v4.raw' \
@@ -119,7 +150,6 @@ then
   feedback error "Failed to download the build script, curl error ${exit_code}"
 else
   chmod 0740 "/root/${app}"
-  
-  feedback h3 'Execute the build script'
+  feedback h2 'Execute the build script'
   "/root/${app}" go
 fi

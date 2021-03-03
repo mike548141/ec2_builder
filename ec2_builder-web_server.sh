@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.37-20210219
+# Version:      0.7.39-20210303
 # File:         ec2_builder-web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -147,6 +147,7 @@ feedback () {
     echo ''
     echo '********************************************************************************'
     echo " *** Error: ${2}"
+    echo ''
   else
     echo ''
     echo "*** Error in the feedback function using the following parameters"
@@ -215,6 +216,8 @@ else
 fi
 
 
+#### ec2-metadata issues same as launch script
+
 #======================================
 # Declare the constants
 #--------------------------------------
@@ -260,16 +263,24 @@ public_ipv4=`ec2-metadata --public-ipv4 | cut -c 14-`
 #======================================
 # Lets get into it
 #--------------------------------------
+### Extra AWS EC2 specific apps - Install if ubuntu? or if not AL2?
+#sudo apt --assume-yes install ec2-ami-tools
+
 # Harden OpenSSH server
 feedback h1 'Harden the OpenSSH daemon'
+if [ ! $(getent group ssh_keys) ]
+then
+  feedback h3 'Create the group ssh_keys'
+  groupadd ssh_keys
+fi
 feedback h3 'Re-generate the RSA and ED25519 keys'
 rm --force /etc/ssh/ssh_host_*
 ssh-keygen -t rsa -b 4096 -f '/etc/ssh/ssh_host_rsa_key' -N ""
 chown root:ssh_keys '/etc/ssh/ssh_host_rsa_key'
-chmod 0640 '/etc/ssh/ssh_host_rsa_key'
+chmod 0600 '/etc/ssh/ssh_host_rsa_key'
 ssh-keygen -t ed25519 -f '/etc/ssh/ssh_host_ed25519_key' -N ""
 chown root:ssh_keys '/etc/ssh/ssh_host_ed25519_key'
-chmod 0640 '/etc/ssh/ssh_host_ed25519_key'
+chmod 0600 '/etc/ssh/ssh_host_ed25519_key'
 feedback h3 'Remove small Diffie-Hellman moduli'
 cp '/etc/ssh/moduli' '/etc/ssh/moduli.bak'
 awk '$5 >= 3071' '/etc/ssh/moduli' > '/etc/ssh/moduli.safe'
@@ -426,12 +437,12 @@ sed -i 's|^# user_allow_other$|user_allow_other|' /etc/fuse.conf
 feedback h3 'Configure AWS CLI credentials for the root user, S3FS uses the same file'
 # This AWS API key and secret is attached to the IAM user ec2.web.cakeit.nz
 aws_access_key_id=`aws ssm get-parameter --name "${common_parameters}/awscli/aws_access_key_id" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption`
-aws_secret_access_key=`aws ssm get-parameter --name "${common_parameters}/awscli/aws_secret_access_key" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption`
+aws_access_key_secret=`aws ssm get-parameter --name "${common_parameters}/awscli/aws_access_key_secret" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption`
 aws configure set aws_access_key_id ${aws_access_key_id}
-aws configure set aws_secret_access_key ${aws_secret_access_key}
+aws configure set aws_access_key_secret ${aws_access_key_secret}
 # Clear the secret from memory
 unset aws_access_key_id
-unset aws_secret_access_key
+unset aws_access_key_secret
 feedback h3 'Mount the S3 bucket for static web data'
 # The AWS S3 bucket used to hold web content that is shared between web hosts, not currently used but is cheaper than EFS
 s3_bucket=`aws ssm get-parameter --name "${app_parameters}/s3_bucket" --query 'Parameter.Value' --output text --region ${aws_region}`
@@ -458,6 +469,9 @@ install_pkg 'golang'
 # Ruby
 feedback h2 'Install Ruby'
 install_pkg 'ruby'
+# Node.js
+feedback h2 'Install Node.js'
+install_pkg 'nodejs'
 # PHP
 feedback h2 'Install PHP'
 manage_ale enable 'php7.3'
@@ -490,26 +504,33 @@ rm --force OoklaServer-linux64.tar
 chown root:root /opt/ookla/server/*
 # Customise the config
 sed -i 's|^logging\.loggers\.app\.|#logging.loggers.app.|g' /opt/ookla/server/OoklaServer.properties.default
-echo 'logging.loggers.app.name = Application' >> /opt/ookla/server/OoklaServer.properties.default
-echo 'logging.loggers.app.channel.class = FileChannel' >> /opt/ookla/server/OoklaServer.properties.default
-echo 'logging.loggers.app.channel.pattern = %Y-%m-%d %H:%M:%S [%P - %I] [%p] %t' >> /opt/ookla/server/OoklaServer.properties.default
-echo 'logging.loggers.app.channel.path = /var/log/ooklaserver' >> /opt/ookla/server/OoklaServer.properties.default
-echo 'logging.loggers.app.level = information' >> /opt/ookla/server/OoklaServer.properties.default
+cat <<EOF >> /opt/ookla/server/OoklaServer.properties.default
+
+# Server config
+logging.loggers.app.name = Application
+logging.loggers.app.channel.class = FileChannel
+logging.loggers.app.channel.pattern = %Y-%m-%d %H:%M:%S [%P - %I] [%p] %t
+logging.loggers.app.channel.path = /var/log/ooklaserver
+logging.loggers.app.level = information
+EOF
 # Configure a daemon for systemd
-echo '[Unit]' > /opt/ookla/server/ookla-server.service
-echo 'Description=ookla-server' >> /opt/ookla/server/ookla-server.service
-echo 'After=network-online.target' >> /opt/ookla/server/ookla-server.service
-echo '' >> /opt/ookla/server/ookla-server.service
-echo '[Service]' >> /opt/ookla/server/ookla-server.service
-echo 'Type=simple' >> /opt/ookla/server/ookla-server.service
-echo 'WorkingDirectory=/opt/ookla/server/' >> /opt/ookla/server/ookla-server.service
-echo 'ExecStart=/opt/ookla/server/OoklaServer' >> /opt/ookla/server/ookla-server.service
-echo 'KillMode=process' >> /opt/ookla/server/ookla-server.service
-echo 'Restart=on-failure' >> /opt/ookla/server/ookla-server.service
-echo 'RestartSec=15min' >> /opt/ookla/server/ookla-server.service
-echo '' >> /opt/ookla/server/ookla-server.service
-echo '[Install]' >> /opt/ookla/server/ookla-server.service
-echo 'WantedBy=multi-user.target' >> /opt/ookla/server/ookla-server.service
+cat <<EOF >> /opt/ookla/server/ookla-server.service
+[Unit]
+Description=ookla-server
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/ookla/server/
+ExecStart=/opt/ookla/server/OoklaServer
+KillMode=process
+Restart=on-failure
+RestartSec=15min
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 ln -s /opt/ookla/server/ookla-server.service /etc/systemd/system/ookla-server.service
 systemctl daemon-reload
 feedback h3 'Ookla CLI'

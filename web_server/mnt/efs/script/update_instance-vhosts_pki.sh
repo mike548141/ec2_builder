@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
-# Find the root directory for the apache HTTPD vhosts
-vhost_root=`grep -i '^Include[ \t].*/vhosts-httpd.conf$' /etc/httpd/conf.d/vhost.conf | sed 's|Include[ \t]||; s|/vhosts-httpd.conf.*||;'`
+# Import the default variables from the common source
+source /mnt/efs/script/common_variables.sh
 
 # Delete all the symlinks pointing to the vhosts because we don't know which ones are valid and invalid, new ones will be created
 for pki_conf in /etc/letsencrypt/renewal/*.conf
@@ -13,8 +13,7 @@ do
   fi
 done
 
-# Link each of the vhosts listed in vhosts-httpd.conf to letsencrypt on this instance. So that all instances can renew all certificates as required
-vhost_list=`grep -i '^include ' ${vhost_root}/vhosts-httpd.conf | sed "s|[iI]nclude \"${vhost_root}/||g; s|/conf/httpd.conf\"||g;"`
+# Link each of the vhosts listed in vhosts-httpd.conf to the Lets Encrypt config on this instance. So that all instances can renew all certificates as required
 for vhost in ${vhost_list}
 do
   if [ -f "${vhost_root}/${vhost}/conf/pki.conf" ]
