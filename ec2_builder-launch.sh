@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.2.2-20210304
+# Version:      0.2.4-20210304
 # File:         ec2_builder-launch.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -20,11 +20,11 @@
 #
 
 #======================================
-# Define the arrays
+# Declare the arrays
 #--------------------------------------
 
 #======================================
-# Define the functions
+# Declare the libraries and functions
 #--------------------------------------
 # Beautifies the feedback to the user/log file on std_out
 feedback () {
@@ -46,9 +46,11 @@ feedback () {
     echo ''
   elif [ "${1}" == "h2" ]
   then
+    echo ''
     echo '================================================================================'
     echo "--> ${2}"
     echo '--------------------------------------------------------------------------------'
+    echo ''
   elif [ "${1}" == "h3" ]
   then
     echo '--------------------------------------------------------------------------------'
@@ -105,7 +107,7 @@ then
   apt --assume-yes install awscli
 fi
 
-feedback h1 'Getting the information needed to launch'
+feedback h1 'Setting up'
 
 feedback body 'Get the EC2 instance ID and AWS region'
 # The initial AWS region setting using the instances placement so that we can connect to the AWS SSM parameter store
@@ -122,6 +124,9 @@ else
   aws_region='us-east-1'
 fi
 
+# Connect to AWS SSM Parameter Store to see what region we should be using
+aws_region=`aws ssm get-parameter --name "${app_parameters}/awscli/aws_region" --query 'Parameter.Value' --output text --region ${aws_region}`
+
 # These are just to download the build script, the build script defines its own tenancy, environment, and build definition
 feedback body 'Get the tenancy and environment from the instance tags'
 tenancy=`aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == 'tenancy'].Value" --output text --region ${aws_region}`
@@ -131,7 +136,7 @@ common_parameters="/${tenancy}/${resource_environment}/common"
 feedback body "Using AWS parameter store ${common_parameters} in the ${aws_region} region for instance ${instance_id}"
 
 # Build script name
-feedback body 'Get the name of the build app'
+feedback body 'Get the name of the build app from the instance tags'
 build_app=`aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == 'build_app'].Value" --output text --region ${aws_region}`
 
 # GitHub API secret
@@ -139,7 +144,7 @@ if [ -f '/usr/bin/aws' ]
 then
   github_api_secret=`aws ssm get-parameter --name "${common_parameters}/github/api_secret" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption`
 else
-  feedback error 'awscli missing'
+  feedback error 'The awscli package is missing'
 fi
 if [ "${github_api_secret}" == "" ]
 then

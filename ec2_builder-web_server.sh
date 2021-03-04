@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.41-20210303
+# Version:      0.7.42-20210304
 # File:         ec2_builder-web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -69,11 +69,9 @@
 #   * Ideally this would use IAM users to support MFA and a user ID that could tie to other services e.g. a S3 bucket dedicated to a IAM user
 #
 
-
 #======================================
 # Declare the arrays
 #--------------------------------------
-
 
 #======================================
 # Declare the libraries and functions
@@ -111,7 +109,6 @@ check_pid_lock () {
   done
 }
 
-
 # Beautifies the feedback to the user/log file on std_out
 feedback () {
   if [ "${1}" == "title" ]
@@ -132,9 +129,11 @@ feedback () {
     echo ''
   elif [ "${1}" == "h2" ]
   then
+    echo ''
     echo '================================================================================'
     echo "--> ${2}"
     echo '--------------------------------------------------------------------------------'
+    echo ''
   elif [ "${1}" == "h3" ]
   then
     echo '--------------------------------------------------------------------------------'
@@ -158,6 +157,20 @@ feedback () {
   fi
 }
 
+# Find what Public IP addresses are assigned to the instance
+get_public_ip () {
+  if [ -f '/usr/bin/ec2metadata' ]
+  then
+    public_ipv4=`ec2metadata --public-ipv4`
+    ##public_ipv6=`ec2metadata --public-ipv6 | cut -c 14-`
+  elif [ -f '/usr/bin/ec2-metadata' ]
+  then
+    public_ipv4=`ec2-metadata --public-ipv4 | cut -c 14-`
+    ##public_ipv6=`ec2-metadata --public-ipv6 | cut -c 14-`
+  else
+    feedback error "Can't find ec2metadata or ec2-metadata to find the public IP"
+  fi
+}
 
 # Install an app using yum
 install_pkg () {
@@ -203,22 +216,20 @@ install_pkg () {
   fi
 }
 
-
 # Wrap the amazon_linux_extras script with additional steps
 manage_ale () {
   amazon-linux-extras ${1} ${2}
   yum clean metadata
 }
 
-
 #======================================
 # Say hello
 #--------------------------------------
 if [ "${1}" == "go" ]
 then
+  feedback title "ec2_builder build script"
   script_ver=`grep '^# Version:[ \t]*' ${0} | sed 's|# Version:[ \t]*||'`
   hostos=`grep 'PRETTY_NAME=' /etc/os-release | sed 's|^PRETTY_NAME="||; s|"$||;'`
-  feedback title "Build script started"
   feedback body "Script: ${0}"
   feedback body "Script version: ${script_ver}"
   feedback body "Host OS: ${hostos}"
@@ -227,71 +238,68 @@ then
   feedback body "Started: `date`"
 else
   feedback error 'Exiting because you did not use the special word'
-  feedback body 'This is to protect against running this script unintentionally, it could cause damage'
+  feedback body 'This is to protect against running this script unintentionally, it could cause damage to the host'
   feedback body "Run '${0} go' to execute the script"
-  echo ''
   exit 1
 fi
-
-#### ec2-metadata issues same as launch script
 
 #======================================
 # Declare the constants
 #--------------------------------------
 feedback h1 'Setting up'
-# The name used in AWS Parameter store to define this script as an app
-app='ec2_builder-web_server.sh'
 
-feedback h3 'Collect local metadata'
-# Get this instances name
-instance_id=`ec2-metadata --instance-id | cut -c 14-`
-
+feedback body 'Get the EC2 instance ID and AWS region'
 # The initial AWS region setting using the instances placement so that we can connect to the AWS SSM parameter store
 if [ -f '/usr/bin/ec2metadata' ]
 then
+  instance_id=`ec2metadata --instance-id`
   aws_region=`ec2metadata --availability-zone | cut -c 1-9`
 elif [ -f '/usr/bin/ec2-metadata' ]
 then
+  instance_id=`ec2-metadata --instance-id | cut -c 14-`
   aws_region=`ec2-metadata --availability-zone | cut -c 12-20`
 else
-  feedback error "Can't find ec2metadata or ec2-metadata to discover the AWS region that this instance is running in, assuming us-east-1"
+  feedback error "Can't find ec2metadata or ec2-metadata, assuming us-east-1 and no instance ID"
   aws_region='us-east-1'
 fi
-feedback body "Using AWS parameter store ${common_parameters} in the ${aws_region} region"
 
+# Configuration parameters are held in AWS Systems Manager Parameter Store, retrieving these using the AWC CLI. Permissions are granted to do this using a IAM role assigned to the instance
 # Delete the AWS credentials file so that the AWS CLI uses the instances profile/role permissions
 if [ -f '/root/.aws/credentials' ]
 then
   rm --force '/root/.aws/credentials'
 fi
 
-# Collect the instances tags to decide what we are building
-feedback h3 'Collect instance tags'
-tenancy=`aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == 'tenancy'].Value" --output text --region ${aws_region}`
-resource_environment=`aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == 'resource_environment'].Value" --output text --region ${aws_region}`
-service_group=`aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == 'service_group'].Value" --output text --region ${aws_region}`
-
-# Configuration parameters are held in AWS Systems Manager Parameter Store, retrieving these using the AWC CLI. Permissions are granted to do this using a IAM role assigned to the instance
-feedback h3 'Collect info from AWS Systems Manager Parameter Store'
-# Define the parameter store structure
-common_parameters="/${tenancy}/${resource_environment}/common"
-app_parameters="/${tenancy}/${resource_environment}/${service_group}/${app}"
 # Connect to AWS SSM Parameter Store to see what region we should be using
 aws_region=`aws ssm get-parameter --name "${app_parameters}/awscli/aws_region" --query 'Parameter.Value' --output text --region ${aws_region}`
 
+# These are just to download the build script, the build script defines its own tenancy, environment, and build definition
+feedback body 'Get the tenancy and environment from the instance tags'
+tenancy=`aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == 'tenancy'].Value" --output text --region ${aws_region}`
+resource_environment=`aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == 'resource_environment'].Value" --output text --region ${aws_region}`
+# Define the parameter store structure
+common_parameters="/${tenancy}/${resource_environment}/common"
+feedback body "Using AWS parameter store ${common_parameters} in the ${aws_region} region for instance ${instance_id}"
+
+# Build script name
+feedback body 'Get the name of the build app from the instance tags'
+build_app=`aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == 'build_app'].Value" --output text --region ${aws_region}`
+
+feedback body 'Get the service group'
+service_group=`aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == 'service_group'].Value" --output text --region ${aws_region}`
+# Define the parameter store structure
+app_parameters="/${tenancy}/${resource_environment}/${service_group}/${build_app}"
 
 #======================================
 # Set the initial values for the variables
 #--------------------------------------
-# Gather variable instance specific information
-public_ipv4=`ec2-metadata --public-ipv4 | cut -c 14-`
-
+get_public_ip
 
 #======================================
 # Lets get into it
 #--------------------------------------
 ### Extra AWS EC2 specific apps - Install if ubuntu? or if not AL2?
-#sudo apt --assume-yes install ec2-ami-tools
+#apt --assume-yes install ec2-ami-tools
 
 # Harden OpenSSH server
 feedback h1 'Harden the OpenSSH daemon'
@@ -335,7 +343,7 @@ aws ec2 associate-address --instance-id ${instance_id} --allocation-id ${eip_all
 # Update the public IP address assigned now the EIP is associated
 feedback body 'Sleep for 5 seconds to allow metadata to update after the EIP association'
 sleep 5
-public_ipv4=`ec2-metadata --public-ipv4 | cut -c 14-`
+get_public_ip
 feedback body "EIP address ${public_ipv4} associated"
 
 
