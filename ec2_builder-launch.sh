@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.2.7-20210304
+# Version:      0.2.8-20210304
 # File:         ec2_builder-launch.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -147,7 +147,7 @@ tenancy=`aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && Reso
 resource_environment=`aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == 'resource_environment'].Value" --output text --region ${aws_region}`
 # Define the parameter store structure
 common_parameters="/${tenancy}/${resource_environment}/common"
-feedback body "Using AWS parameter store ${common_parameters} in the ${aws_region} region for instance ${instance_id}"
+feedback body "Using AWS parameter store ${common_parameters} in the ${aws_region} region"
 
 # Build script name
 feedback body 'Get the name of the build app from the instance tags'
