@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.45-20210304
+# Version:      0.7.46-20210304
 # File:         ec2_builder-web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -574,7 +574,8 @@ cat <<***EOF*** > '/etc/php-fpm.d/vhost.conf'
 include=${efs_mount_point}/conf/vhosts-php-fpm.conf
 ***EOF***
 feedback h3 'Restart PHP-FPM to recognise the additional PHP modules and config'
-systemctl restart php-fpm
+systemctl restart php-fpm.service
+systemctl -l status php-fpm.service
 
 # Install Speedtest
 feedback h1 'Install Ookla Speedtest'
@@ -702,7 +703,7 @@ then
   touch '/etc/letsencrypt/options-ssl-apache.conf'
 fi
 feedback h3 'Restart the web server'
-systemctl restart httpd
+systemctl restart httpd.service
 feedback h3 'Web server status'
 systemctl -l status httpd.service
 
