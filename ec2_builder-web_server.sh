@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.46-20210304
+# Version:      0.7.48-20210304
 # File:         ec2_builder-web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -179,7 +179,7 @@ pkgmgr () {
     check_pid_lock 'apt'
     if [ "${1}" == "install" ]
     then
-      apt --assumeyes install ${2}
+      apt --assume-yes install ${2}
       local exit_code=${?}
     elif [ "${1}" == "update" ]
     then
@@ -401,10 +401,13 @@ feedback h1 'Update the software stack'
 pkgmgr update
 systemctl daemon-reload
 
-# Add access to Extra Packages for Enterprise Linux (EPEL) from the Fedora project
-feedback h1 'Add access to Extra Packages for Enterprise Linux (EPEL) from the Fedora project'
-manage_ale enable 'epel'
-pkgmgr install 'epel-release'
+if [ "${hostos_id}" == 'amzn' ]
+then
+  # Add access to Extra Packages for Enterprise Linux (EPEL) from the Fedora project
+  feedback h1 'Add access to Extra Packages for Enterprise Linux (EPEL) from the Fedora project'
+  manage_ale enable 'epel'
+  pkgmgr install 'epel-release'
+fi
 
 # Install the management agents
 feedback h1 'Install the management agents'
