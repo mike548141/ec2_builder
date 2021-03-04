@@ -174,7 +174,23 @@ get_public_ip () {
 
 # Install an app using yum
 pkgmgr () {
-  if [ -f '/usr/bin/yum' ]
+  if [ "${hostos_pkgmgr}" == 'apt' ]
+  then
+    check_pid_lock 'apt'
+    if [ "${1}" == "install" ]
+    then
+      apt --assumeyes install ${2}
+      local exit_code=${?}
+    elif [ "${1}" == "update" ]
+    then
+      apt update
+      local exit_code=${?}
+    fi
+    if [ ${exit_code} -ne 0 ]
+    then
+      feedback error "apt exit code ${exit_code}"
+    fi
+  elif [ "${hostos_pkgmgr}" == 'yum' ]
   then
     check_pid_lock 'yum'
     if [ "${1}" == "install" ]
@@ -209,31 +225,16 @@ pkgmgr () {
       local exit_code=${?}
     fi
     check_pid_lock 'yum'
-  elif [ -f '/usr/bin/apt' ]
-  then
-    check_pid_lock 'apt'
-    if [ "${1}" == "install" ]
-    then
-      apt --assumeyes install ${2}
-      local exit_code=${?}
-    elif [ "${1}" == "update" ]
-    then
-      apt update
-      local exit_code=${?}
-    fi
-    if [ ${exit_code} -ne 0 ]
-    then
-      feedback error "apt exit code ${exit_code}"
-    fi
-  else
-    feedback error 'Package manager not found'
   fi
 }
 
 # Wrap the amazon_linux_extras script with additional steps
 manage_ale () {
-  amazon-linux-extras ${1} ${2}
-  yum clean metadata
+  if [ "${hostos_id}" == 'amzn' ]
+  then
+    amazon-linux-extras ${1} ${2}
+    yum clean metadata
+  fi
 }
 
 #======================================
@@ -243,10 +244,10 @@ if [ "${1}" == "go" ]
 then
   feedback title "ec2_builder build script"
   script_ver=`grep '^# Version:[ \t]*' ${0} | sed 's|# Version:[ \t]*||'`
-  hostos=`grep 'PRETTY_NAME=' /etc/os-release | sed 's|^PRETTY_NAME="||; s|"$||;'`
+  hostos_pretty=`grep '^PRETTY_NAME=' /etc/os-release | sed 's|"||g; s|^PRETTY_NAME=||;'`
   feedback body "Script: ${0}"
   feedback body "Script version: ${script_ver}"
-  feedback body "Host OS: ${hostos}"
+  feedback body "Host OS: ${hostos_pretty}"
   feedback body "Shell: `readlink /proc/$$/exe`"
   feedback body "Running as user: `whoami`"
   feedback body "Started: `date`"
@@ -260,6 +261,19 @@ fi
 #======================================
 # Declare the constants
 #--------------------------------------
+# Get to know the OS so we can support Amazon Linux (RHEL) and Ubuntu (Debian)
+hostos_id=`grep '^ID=' /etc/os-release | sed 's|"||g; s|^ID=||;'`
+hostos_ver=`grep '^VERSION_ID=' /etc/os-release | sed 's|"||g; s|^VERSION_ID=||;'`
+if [ -f '/usr/bin/apt' ]
+then
+  hostos_pkgmgr='apt'
+elif [ -f '/usr/bin/yum' ]
+then
+  hostos_pkgmgr='yum'
+else
+  feedback error 'Package manager not found'
+fi
+
 # AWS CLI
 if [ ! -f '/usr/bin/aws' ]
 then
@@ -322,6 +336,7 @@ get_public_ip
 # Lets get into it
 #--------------------------------------
 # Additional AWS EC2 tools, only applicable to Ubuntu
+feedback h1 'Install AWS tools'
 pkgmgr install 'ec2-ami-tools'
 
 # Harden OpenSSH server
@@ -348,11 +363,13 @@ cp '/etc/ssh/sshd_config' '/etc/ssh/sshd_config.bak'
 sed -i 's|^HostKey /etc/ssh/ssh_host_dsa_key$|#HostKey /etc/ssh/ssh_host_dsa_key|g' '/etc/ssh/sshd_config'
 sed -i 's|^HostKey /etc/ssh/ssh_host_ecdsa_key$|#HostKey /etc/ssh/ssh_host_ecdsa_key|g' '/etc/ssh/sshd_config'
 feedback h3 'Restrict supported key exchange, cipher, and MAC algorithms'
-echo '' >> '/etc/ssh/sshd_config'
-echo '# Restrict key exchange, cipher, and MAC algorithms' >> '/etc/ssh/sshd_config'
-echo 'KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group18-sha512,diffie-hellman-group16-sha512,diffie-hellman-group-exchange-sha256' >> '/etc/ssh/sshd_config'
-echo 'Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr' >> '/etc/ssh/sshd_config'
-echo 'MACs hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com,umac-128-etm@openssh.com' >> '/etc/ssh/sshd_config'
+cat <<***EOF*** >> '/etc/ssh/sshd_config'
+
+# Restrict key exchange, cipher, and MAC algorithms
+KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group18-sha512,diffie-hellman-group16-sha512,diffie-hellman-group-exchange-sha256
+Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr
+MACs hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com,umac-128-etm@openssh.com
+***EOF***
 feedback h3 'Restart OpenSSH server'
 systemctl restart sshd
 
@@ -406,10 +423,17 @@ feedback h2 'Install linux system auditing'
 pkgmgr install 'audit audispd-plugins'
 feedback h2 'Install osquery'
 feedback h3 'Add the osquery repo and trust the GPG key'
-curl -L https://pkg.osquery.io/rpm/GPG | sudo tee /etc/pki/rpm-gpg/RPM-GPG-KEY-osquery
-rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-osquery
-sudo yum-config-manager --add-repo https://pkg.osquery.io/rpm/osquery-s3-rpm.repo
-sudo yum-config-manager --enable osquery-s3-rpm
+if [ "${hostos_pkgmgr}" == 'apt' ]
+then
+  apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 1484120AC4E9F8A1A577AEEE97A80C63C9D8B80B
+  add-apt-repository 'deb [arch=amd64] https://pkg.osquery.io/deb deb main'
+elif [ "${hostos_pkgmgr}" == 'yum' ]
+then
+  curl -L https://pkg.osquery.io/rpm/GPG | sudo tee /etc/pki/rpm-gpg/RPM-GPG-KEY-osquery
+  rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-osquery
+  yum-config-manager --add-repo https://pkg.osquery.io/rpm/osquery-s3-rpm.repo
+  yum-config-manager --enable osquery-s3-rpm
+fi
 pkgmgr install 'osquery'
 
 # Install AWS EFS helper and mount the EFS volume for vhost data
@@ -426,17 +450,19 @@ then
 fi
 mount -t efs -o tls ${efs_volume}:/ ${efs_mount_point}
 feedback body 'Set it to auto mount at boot'
-echo "# Mount AWS EFS volume ${efs_volume} for the web root data" >> /etc/fstab
-echo "${efs_volume}:/ ${efs_mount_point} efs tls,_netdev 0 0" >> /etc/fstab
+cat <<***EOF*** >> '/etc/fstab'
+# Mount AWS EFS volume ${efs_volume} for the web root data
+${efs_volume}:/ ${efs_mount_point} efs tls,_netdev 0 0
+***EOF***
 
 # Import the common constants and variables held in a script on the EFS volume. This saves duplicating code between scripts
 feedback h1 'Import the common constants and variables from EFS'
 source "${efs_mount_point}/script/common_variables.sh"
 
 # Create a directory for this instances log files on the EFS volume
+## Probably remove this section above, should not be used anymore but need to check that
 feedback h1 'Create a space for this instances log files on the EFS volume'
 mkdir --parents "${vhost_root}/_default_/log/${instance_id}.${hosting_domain}"
-## Probably remove this section above, should not be used anymore
 
 # Create users and groups
 # The OS and base AMI packages use 0-1000 for the UID's and GID's they require. I have reserved 1001-2000 for UID's and GID's that are intrinsic to the build. UID & GID 2001 and above are for general use.
@@ -500,8 +526,10 @@ then
 fi
 s3fs ${s3_bucket} ${s3_mount_point} -o allow_other -o use_path_request_style
 feedback body 'Set it to auto mount at boot'
-echo "# Mount AWS S3 bucket ${s3_bucket} for static web data" >> /etc/fstab
-echo "s3fs#${s3_bucket} ${s3_mount_point} fuse _netdev,allow_other,use_path_request_style 0 0" >> /etc/fstab
+cat <<***EOF*** >> '/etc/fstab'
+# Mount AWS S3 bucket ${s3_bucket} for static web data
+s3fs#${s3_bucket} ${s3_mount_point} fuse _netdev,allow_other,use_path_request_style 0 0
+***EOF***
 
 # Install scripting languages
 feedback h1 'Install scripting languages'
@@ -530,15 +558,17 @@ cp "${vhost_root}/_default_/conf/instance-specific-php-fpm.conf" /etc/php-fpm.d/
 sed -i "s|i-.*\.cakeit\.nz|${instance_id}.${hosting_domain}|g" /etc/php-fpm.d/this-instance.conf
 # Include the vhost config on the EFS volume
 feedback h3 'Include the vhost config on the EFS volume'
-echo '; Include the vhosts stored on the EFS volume' > /etc/php-fpm.d/vhost.conf
-echo "include=${efs_mount_point}/conf/vhosts-php-fpm.conf" >> /etc/php-fpm.d/vhost.conf
+cat <<***EOF*** > '/etc/php-fpm.d/vhost.conf'
+; Include the vhosts stored on the EFS volume
+include=${efs_mount_point}/conf/vhosts-php-fpm.conf
+***EOF***
 feedback h3 'Restart PHP-FPM to recognise the additional PHP modules and config'
 systemctl restart php-fpm
 
 # Install Speedtest
 feedback h1 'Install Ookla Speedtest'
 feedback h3 'Ookla server'
-mkdir --parents /opt/ookla/server
+mkdir --parents '/opt/ookla/server'
 cd /opt/ookla/server/
 wget http://install.speedtest.net/ooklaserver/stable/OoklaServer.tgz
 tar -xzvf OoklaServer.tgz OoklaServer-linux64.tar
@@ -548,7 +578,7 @@ rm --force OoklaServer-linux64.tar
 chown root:root /opt/ookla/server/*
 # Customise the config
 sed -i 's|^logging\.loggers\.app\.|#logging.loggers.app.|g' /opt/ookla/server/OoklaServer.properties.default
-cat <<EOF >> /opt/ookla/server/OoklaServer.properties.default
+cat <<***EOF*** >> '/opt/ookla/server/OoklaServer.properties.default'
 
 # Server config
 logging.loggers.app.name = Application
@@ -556,9 +586,9 @@ logging.loggers.app.channel.class = FileChannel
 logging.loggers.app.channel.pattern = %Y-%m-%d %H:%M:%S [%P - %I] [%p] %t
 logging.loggers.app.channel.path = /var/log/ooklaserver
 logging.loggers.app.level = information
-EOF
+***EOF***
 # Configure a daemon for systemd
-cat <<EOF >> /opt/ookla/server/ookla-server.service
+cat <<***EOF*** > '/opt/ookla/server/ookla-server.service'
 [Unit]
 Description=ookla-server
 After=network-online.target
@@ -573,12 +603,19 @@ RestartSec=15min
 
 [Install]
 WantedBy=multi-user.target
-EOF
+***EOF***
 ln -s /opt/ookla/server/ookla-server.service /etc/systemd/system/ookla-server.service
 systemctl daemon-reload
 feedback h3 'Ookla CLI'
-wget https://bintray.com/ookla/rhel/rpm -O bintray-ookla-rhel.repo
-mv bintray-ookla-rhel.repo /etc/yum.repos.d/
+if [ "${hostos_pkgmgr}" == 'apt' ]
+then
+  apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 379CE192D401AB61
+  add-apt-repository "deb https://ookla.bintray.com/debian `lsb_release -sc` main"
+elif [ "${hostos_pkgmgr}" == 'yum' ]
+then
+  yum-config-manager --add-repo https://bintray.com/ookla/rhel/rpm
+  yum-config-manager --enable bintray.com_ookla_rhel_rpm
+fi
 pkgmgr install 'speedtest'
 
 # Install Ghost Script, a PostScript interpreter and renderer that is used by WordPress for PDFs
@@ -618,7 +655,13 @@ systemctl enable httpd
 feedback h2 'Customise the web server config'
 # Install extra modules
 feedback h3 'Install additional Apache HTTPD modules'
-pkgmgr install 'https://dl-ssl.google.com/dl/linux/direct/mod-pagespeed-stable_current_x86_64.rpm'
+if [ "${hostos_pkgmgr}" == 'apt' ]
+then
+  pkgmgr install 'https://dl-ssl.google.com/dl/linux/direct/mod-pagespeed-stable_current_amd64.deb'
+elif [ "${hostos_pkgmgr}" == 'yum' ]
+then
+  pkgmgr install 'https://dl-ssl.google.com/dl/linux/direct/mod-pagespeed-stable_current_x86_64.rpm'
+fi
 # Replace the Apache HTTPD MPM module prefork with the module event for HTTP/2 compatibility and to improve server performance
 feedback h3 'Change MPM modules from prefork to event'
 cp '/etc/httpd/conf.modules.d/00-mpm.conf' '/etc/httpd/conf.modules.d/00-mpm.conf.bak'
@@ -636,8 +679,10 @@ cp "${vhost_root}/_default_/conf/instance-specific-httpd.conf" /etc/httpd/conf.d
 sed -i "s|i-instanceid\.cakeit\.nz|${instance_id}.${hosting_domain}|g" /etc/httpd/conf.d/this-instance.conf
 # Include the vhost config on the EFS volume
 feedback h3 'Include the vhost config from the EFS volume'
-echo '# Publish the vhosts stored on the EFS volume' > /etc/httpd/conf.d/vhost.conf
-echo "Include ${vhost_httpd_conf}" >> /etc/httpd/conf.d/vhost.conf
+cat <<***EOF*** > '/etc/httpd/conf.d/vhost.conf'
+# Publish the vhosts stored on the EFS volume
+Include ${vhost_httpd_conf}
+***EOF***
 # The vhosts httpd config points to this conf file, it won't exist yet since LetsEncrypt has not run yet. This creates an empty file so that httpd can load.
 if [ ! -f '/etc/letsencrypt/options-ssl-apache.conf' ]
 then
@@ -659,7 +704,10 @@ curl -X POST "https://api.cloudflare.com/client/v4/zones/${cloudflare_zoneid}/dn
      -H "Authorization: Bearer ${cloudflare_api_token}" \
      -H "Content-Type: application/json" \
      --data '{"type":"A","name":"'"${instance_id}"'","content":"'"${public_ipv4}"'","ttl":1,"priority":10,"proxied":false}'
-### Create AAAA record
+##curl -X POST "https://api.cloudflare.com/client/v4/zones/${cloudflare_zoneid}/dns_records" \
+##     -H "Authorization: Bearer ${cloudflare_api_token}" \
+##     -H "Content-Type: application/json" \
+##     --data '{"type":"AAAA","name":"'"${instance_id}"'","content":"'"${public_ipv6}"'","ttl":1,"priority":10,"proxied":false}'
 # Clear the secret from memory
 unset cloudflare_api_token
 feedback h3 'Sleeping for 5 seconds to allow that DNS change to replicate'
@@ -676,13 +724,14 @@ mkdir --parents "/var/log/letsencrypt"
 certbot certonly --domains "${instance_id}.${hosting_domain},web2.${hosting_domain}" --apache --non-interactive --agree-tos --email "${pki_email}" --no-eff-email --logs-dir "/var/log/letsencrypt" --redirect --must-staple --staple-ocsp --hsts --uir
 
 # Customise the _default_ vhost config to include the new certificate created by certbot
-if [[ -f "/etc/letsencrypt/live/${instance_id}.${hosting_domain}/fullchain.pem" && -f "/etc/letsencrypt/live/${instance_id}.${hosting_domain}/privkey.pem" ]]
+if [ -f "/etc/letsencrypt/live/${instance_id}.${hosting_domain}/fullchain.pem" ] && [ -f "/etc/letsencrypt/live/${instance_id}.${hosting_domain}/privkey.pem" ]
 then
   feedback h3 'Add the certificates to the web server config'
-  sed -i "s|[^#]SSLCertificateFile| #SSLCertificateFile|g" /etc/httpd/conf.d/this-instance.conf
-  sed -i "s|[^#]SSLCertificateKeyFile| #SSLCertificateKeyFile|g" /etc/httpd/conf.d/this-instance.conf
-  sed -i "s|#SSLCertificateFile[ \t]*/etc/letsencrypt/live/|SSLCertificateFile\t\t/etc/letsencrypt/live/|" /etc/httpd/conf.d/this-instance.conf
-  sed -i "s|#SSLCertificateKeyFile[ \t]*/etc/letsencrypt/live/|SSLCertificateKeyFile\t\t/etc/letsencrypt/live/|" /etc/httpd/conf.d/this-instance.conf
+  ### Check this sed works
+  sed -i "s|[^#]SSLCertificateFile| #SSLCertificateFile|g; \
+          s|[^#]SSLCertificateKeyFile| #SSLCertificateKeyFile|g; \
+          s|#SSLCertificateFile[ \t]*/etc/letsencrypt/live/|SSLCertificateFile\t\t/etc/letsencrypt/live/|; \
+          s|#SSLCertificateKeyFile[ \t]*/etc/letsencrypt/live/|SSLCertificateKeyFile\t\t/etc/letsencrypt/live/|;" '/etc/httpd/conf.d/this-instance.conf'
   feedback h3 'Restart the web server'
   systemctl restart httpd
 fi
@@ -691,11 +740,15 @@ feedback h3 'Include the vhosts Lets Encrypt config on this server'
 source "${efs_mount_point}/script/update_instance-vhosts_pki.sh"
 # Add a job to cron to run certbot regularly for renewals and revocations
 feedback h3 'Add a job to cron to run certbot daily'
-echo '#!/usr/bin/env bash' > /etc/cron.daily/certbot
-echo '# Update this instances configuration including what certificates need to be renewed' >> /etc/cron.daily/certbot
-echo "${efs_mount_point}/script/update_instance-vhosts_pki.sh" >> /etc/cron.daily/certbot
-echo '# Run Lets Encrypt Certbot to revoke and/or renew certiicates' >> /etc/cron.daily/certbot
-echo 'certbot renew --no-self-upgrade' >> /etc/cron.daily/certbot
+cat <<***EOF*** > '/etc/cron.daily/certbot'
+#!/usr/bin/env bash
+
+# Update this instances configuration including what certificates need to be renewed
+${efs_mount_point}/script/update_instance-vhosts_pki.sh
+
+# Run Lets Encrypt Certbot to revoke and/or renew certiicates
+certbot renew --no-self-upgrade
+***EOF***
 chmod 0770 /etc/cron.daily/certbot
 systemctl restart crond
 

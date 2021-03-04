@@ -79,10 +79,10 @@ feedback () {
 #--------------------------------------
 feedback title "ec2_builder launch script"
 script_ver=`grep '^# Version:[ \t]*' ${0} | sed 's|# Version:[ \t]*||'`
-hostos=`grep 'PRETTY_NAME=' /etc/os-release | sed 's|^PRETTY_NAME="||; s|"$||;'`
+hostos_pretty=`grep '^PRETTY_NAME=' /etc/os-release | sed 's|"||g; s|^PRETTY_NAME=||;'`
 feedback body "Script: ${0}"
 feedback body "Script version: ${script_ver}"
-feedback body "Host OS: ${hostos}"
+feedback body "Host OS: ${hostos_pretty}"
 feedback body "Shell: `readlink /proc/$$/exe`"
 feedback body "Running as user: `whoami`"
 feedback body "Started: `date`"
@@ -90,6 +90,19 @@ feedback body "Started: `date`"
 #======================================
 # Declare the constants
 #--------------------------------------
+# Get to know the OS so we can support Amazon Linux (RHEL) and Ubuntu (Debian)
+hostos_id=`grep '^ID=' /etc/os-release | sed 's|"||g; s|^ID=||;'`
+hostos_ver=`grep '^VERSION_ID=' /etc/os-release | sed 's|"||g; s|^VERSION_ID=||;'`
+if [ -f '/usr/bin/apt' ]
+then
+  hostos_pkgmgr='apt'
+elif [ -f '/usr/bin/yum' ]
+then
+  hostos_pkgmgr='yum'
+else
+  feedback error 'Package manager not found'
+fi
+
 # AWS CLI
 if [ ! -f '/usr/bin/aws' ] && [ -f '/usr/bin/apt' ]
 then
