@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.2.4-20210304
+# Version:      0.2.5-20210304
 # File:         ec2_builder-launch.sh
 # License:      GNU GPL v3
 # Language:     bash

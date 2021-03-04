@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.42-20210304
+# Version:      0.7.43-20210304
 # File:         ec2_builder-web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
