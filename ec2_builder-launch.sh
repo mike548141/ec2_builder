@@ -90,14 +90,6 @@ feedback body "Started: `date`"
 #======================================
 # Declare the constants
 #--------------------------------------
-
-#======================================
-# Declare the variables
-#--------------------------------------
-
-#======================================
-# Lets get into it
-#--------------------------------------
 # AWS CLI
 if [ ! -f '/usr/bin/aws' ] && [ -f '/usr/bin/apt' ]
 then
@@ -122,6 +114,13 @@ then
 else
   feedback error "Can't find ec2metadata or ec2-metadata, assuming us-east-1 and no instance ID"
   aws_region='us-east-1'
+fi
+
+# Configuration parameters are held in AWS Systems Manager Parameter Store, retrieving these using the AWC CLI. Permissions are granted to do this using a IAM role assigned to the instance
+# Delete the AWS credentials file so that the AWS CLI uses the instances profile/role permissions
+if [ -f '/root/.aws/credentials' ]
+then
+  rm --force '/root/.aws/credentials'
 fi
 
 # Connect to AWS SSM Parameter Store to see what region we should be using
@@ -151,6 +150,13 @@ then
   feedback error 'Failed to retrieve the GitHub API secret'
 fi
 
+#======================================
+# Declare the variables
+#--------------------------------------
+
+#======================================
+# Lets get into it
+#--------------------------------------
 feedback h1 'Download the build script'
 cd /root
 curl -H "Authorization: token ${github_api_secret}" \

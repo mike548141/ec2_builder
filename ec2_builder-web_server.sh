@@ -173,43 +173,57 @@ get_public_ip () {
 }
 
 # Install an app using yum
-install_pkg () {
+pkgmgr () {
   if [ -f '/usr/bin/yum' ]
   then
     check_pid_lock 'yum'
-    yum install --assumeyes ${1}
-    local exit_code=${?}
-    if [ ${exit_code} -ne 0 ]
+    if [ "${1}" == "install" ]
     then
-      feedback error "yum install exit code ${exit_code}"
-      feedback body 'Retrying install in 60 seconds'
-      sleep 60
-      feedback h3 'Running yum-complete-transaction -y'
-      yum-complete-transaction -y
-      exit_code=${?}
-      feedback body "Exit code ${exit_code}"
-      feedback h3 'Running yum history redo last'
-      yum history redo last
-      exit_code=${?}
-      feedback body "Exit code ${exit_code}"
-      feedback h3 'Running yum clean all'
-      yum clean all
-      exit_code=${?}
-      feedback body "Exit code ${exit_code}"
-      feedback h3 "Running yum install --assumeyes ${1}"
-      yum install --assumeyes ${1}
-      exit_code=${?}
-      feedback body "Exit code ${exit_code}"
+      yum install --assumeyes ${2}
+      local exit_code=${?}
+      if [ ${exit_code} -ne 0 ]
+      then
+        feedback error "yum install exit code ${exit_code}"
+        feedback body 'Retrying install in 60 seconds'
+        sleep 60
+        feedback h3 'Running yum-complete-transaction -y'
+        yum-complete-transaction -y
+        exit_code=${?}
+        feedback body "Exit code ${exit_code}"
+        feedback h3 'Running yum history redo last'
+        yum history redo last
+        exit_code=${?}
+        feedback body "Exit code ${exit_code}"
+        feedback h3 'Running yum clean all'
+        yum clean all
+        exit_code=${?}
+        feedback body "Exit code ${exit_code}"
+        feedback h3 "Running yum install --assumeyes ${2}"
+        yum install --assumeyes ${2}
+        exit_code=${?}
+        feedback body "Exit code ${exit_code}"
+      fi
+    elif [ "${1}" == "update" ]
+    then
+      yum update --assumeyes
+      local exit_code=${?}
     fi
     check_pid_lock 'yum'
   elif [ -f '/usr/bin/apt' ]
   then
     check_pid_lock 'apt'
-    apt --assumeyes install ${1}
-    local exit_code=${?}
+    if [ "${1}" == "install" ]
+    then
+      apt --assumeyes install ${2}
+      local exit_code=${?}
+    elif [ "${1}" == "update" ]
+    then
+      apt update
+      local exit_code=${?}
+    fi
     if [ ${exit_code} -ne 0 ]
     then
-      feedback error "apt install exit code ${exit_code}"
+      feedback error "apt exit code ${exit_code}"
     fi
   else
     feedback error 'Package manager not found'
@@ -246,6 +260,15 @@ fi
 #======================================
 # Declare the constants
 #--------------------------------------
+# AWS CLI
+if [ ! -f '/usr/bin/aws' ]
+then
+  # Assume AWS CLI is not installed and we have the apt package manager. Amazon Linux 2 includes AWS CLI by default but Ubuntu does not
+  feedback h1 'Installing the awscli package'
+  pkgmgr update
+  pkgmgr install 'awscli'
+fi
+
 feedback h1 'Setting up'
 
 feedback body 'Get the EC2 instance ID and AWS region'
@@ -291,15 +314,15 @@ service_group=`aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' &
 app_parameters="/${tenancy}/${resource_environment}/${service_group}/${build_app}"
 
 #======================================
-# Set the initial values for the variables
+# Declare the variables
 #--------------------------------------
 get_public_ip
 
 #======================================
 # Lets get into it
 #--------------------------------------
-### Extra AWS EC2 specific apps - Install if ubuntu? or if not AL2?
-#apt --assume-yes install ec2-ami-tools
+# Additional AWS EC2 tools, only applicable to Ubuntu
+pkgmgr install 'ec2-ami-tools'
 
 # Harden OpenSSH server
 feedback h1 'Harden the OpenSSH daemon'
@@ -333,7 +356,6 @@ echo 'MACs hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com,umac-128-
 feedback h3 'Restart OpenSSH server'
 systemctl restart sshd
 
-
 # Allocate the AWS EIP to this instance
 feedback h1 'Allocate the EIP public IP address to this instance'
 # Get the AWS Elastic IP address used to web host
@@ -346,58 +368,53 @@ sleep 5
 get_public_ip
 feedback body "EIP address ${public_ipv4} associated"
 
-
 # Update the software stack
 feedback h1 'Update the software stack'
-yum update --assumeyes
+pkgmgr update
 systemctl daemon-reload
-
 
 # Add access to Extra Packages for Enterprise Linux (EPEL) from the Fedora project
 feedback h1 'Add access to Extra Packages for Enterprise Linux (EPEL) from the Fedora project'
 manage_ale enable 'epel'
-install_pkg 'epel-release'
-
+pkgmgr install 'epel-release'
 
 # Install the management agents
 feedback h1 'Install the management agents'
-install_pkg 'amazon-ssm-agent'
+pkgmgr install 'amazon-ssm-agent'
 # Disabled as these packages are not required yet/at all
 #manage_ale enable 'ansible2'
-#install_pkg 'ansible'
+#pkgmgr install 'ansible'
 #manage_ale enable 'rust1'
-#install_pkg 'rust cargo'
-#install_pkg 'chef'
-#install_pkg 'puppet'
-#install_pkg 'salt'
-
+#pkgmgr install 'rust cargo'
+#pkgmgr install 'chef'
+#pkgmgr install 'puppet'
+#pkgmgr install 'salt'
 
 # Install security apps, requires EPEL
 feedback h1 'Install security apps to protect the host'
-#install_pkg 'fail2ban firewalld rkhunter selinux-policy tripwire'
+#pkgmgr install 'fail2ban firewalld rkhunter selinux-policy tripwire'
 feedback h2 'Install fail2ban'
-install_pkg 'fail2ban'
+pkgmgr install 'fail2ban'
 feedback h2 'Install root kit hunter'
-install_pkg 'rkhunter'
+pkgmgr install 'rkhunter'
 feedback h2 'Install tripwire'
-install_pkg 'tripwire'
+pkgmgr install 'tripwire'
 feedback h2 'Install selinux'
-install_pkg 'policycoreutils selinux-policy-targeted policycoreutils-python'
+pkgmgr install 'policycoreutils selinux-policy-targeted policycoreutils-python'
 ##feedback h3 'Enable selinux'
 feedback h2 'Install linux system auditing'
-install_pkg 'audit audispd-plugins'
+pkgmgr install 'audit audispd-plugins'
 feedback h2 'Install osquery'
 feedback h3 'Add the osquery repo and trust the GPG key'
 curl -L https://pkg.osquery.io/rpm/GPG | sudo tee /etc/pki/rpm-gpg/RPM-GPG-KEY-osquery
 rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-osquery
 sudo yum-config-manager --add-repo https://pkg.osquery.io/rpm/osquery-s3-rpm.repo
 sudo yum-config-manager --enable osquery-s3-rpm
-install_pkg 'osquery'
-
+pkgmgr install 'osquery'
 
 # Install AWS EFS helper and mount the EFS volume for vhost data
 feedback h1 'Install AWS EFS helper'
-install_pkg 'amazon-efs-utils'
+pkgmgr install 'amazon-efs-utils'
 feedback h3 'Mount the EFS volume for vhost data'
 # The AWS EFS volume and mount point used to hold virtual host config, content and logs that is shared between web hosts (aka instances)
 efs_volume=`aws ssm get-parameter --name "${app_parameters}/efs_volume" --query 'Parameter.Value' --output text --region ${aws_region}`
@@ -412,17 +429,14 @@ feedback body 'Set it to auto mount at boot'
 echo "# Mount AWS EFS volume ${efs_volume} for the web root data" >> /etc/fstab
 echo "${efs_volume}:/ ${efs_mount_point} efs tls,_netdev 0 0" >> /etc/fstab
 
-
 # Import the common constants and variables held in a script on the EFS volume. This saves duplicating code between scripts
 feedback h1 'Import the common constants and variables from EFS'
 source "${efs_mount_point}/script/common_variables.sh"
-
 
 # Create a directory for this instances log files on the EFS volume
 feedback h1 'Create a space for this instances log files on the EFS volume'
 mkdir --parents "${vhost_root}/_default_/log/${instance_id}.${hosting_domain}"
 ## Probably remove this section above, should not be used anymore
-
 
 # Create users and groups
 # The OS and base AMI packages use 0-1000 for the UID's and GID's they require. I have reserved 1001-2000 for UID's and GID's that are intrinsic to the build. UID & GID 2001 and above are for general use.
@@ -451,11 +465,9 @@ do
   fi
 done
 
-
 # Google Authenticator adds MFA capability to PAM - https://aws.amazon.com/blogs/startups/securing-ssh-to-amazon-ec2-linux-hosts/
 feedback h1 'Install Google Authenticator to support MFA'
-install_pkg 'google-authenticator'
-
+pkgmgr install 'google-authenticator'
 
 # Default config for AWS CLI tools
 feedback h1 'Configure AWS CLI for the root user'
@@ -463,10 +475,9 @@ aws_cli_output=`aws ssm get-parameter --name "${app_parameters}/awscli/aws_cli_o
 aws configure set region ${aws_region}
 aws configure set output ${aws_cli_output}
 
-
 # Install Fuse S3FS and mount the S3 bucket for web server data - https://github.com/s3fs-fuse/s3fs-fuse
 feedback h1 'Install Fuse S3FS'
-install_pkg 's3fs-fuse'
+pkgmgr install 's3fs-fuse'
 feedback h3 'Configure FUSE'
 sed -i 's|^# user_allow_other$|user_allow_other|' /etc/fuse.conf
 feedback h3 'Configure AWS CLI credentials for the root user, S3FS uses the same file'
@@ -492,28 +503,27 @@ feedback body 'Set it to auto mount at boot'
 echo "# Mount AWS S3 bucket ${s3_bucket} for static web data" >> /etc/fstab
 echo "s3fs#${s3_bucket} ${s3_mount_point} fuse _netdev,allow_other,use_path_request_style 0 0" >> /etc/fstab
 
-
 # Install scripting languages
 feedback h1 'Install scripting languages'
 # Python
 feedback h2 'Install Python'
-install_pkg 'python python3'
+pkgmgr install 'python python3'
 # Go
 feedback h2 'Install Go'
-install_pkg 'golang'
+pkgmgr install 'golang'
 # Ruby
 feedback h2 'Install Ruby'
-install_pkg 'ruby'
+pkgmgr install 'ruby'
 # Node.js
 feedback h2 'Install Node.js'
-install_pkg 'nodejs'
+pkgmgr install 'nodejs'
 # PHP
 feedback h2 'Install PHP'
 manage_ale enable 'php7.3'
-install_pkg 'php-cli php-pdo php-fpm php-json php-mysqlnd php-common'
+pkgmgr install 'php-cli php-pdo php-fpm php-json php-mysqlnd php-common'
 # Customise the PHP config
 feedback h3 'Install additional PHP modules'
-install_pkg 'php-bcmath php-gd php-intl php-mbstring php-pecl-apcu php-pecl-imagick php-pecl-libsodium php-pecl-zip php-xml'
+pkgmgr install 'php-bcmath php-gd php-intl php-mbstring php-pecl-apcu php-pecl-imagick php-pecl-libsodium php-pecl-zip php-xml'
 # Create a PHP config for the _default_ vhost
 feedback h3 'Create a PHP-FPM config on EBS for this instances _default_ vhost'
 cp "${vhost_root}/_default_/conf/instance-specific-php-fpm.conf" /etc/php-fpm.d/this-instance.conf
@@ -524,7 +534,6 @@ echo '; Include the vhosts stored on the EFS volume' > /etc/php-fpm.d/vhost.conf
 echo "include=${efs_mount_point}/conf/vhosts-php-fpm.conf" >> /etc/php-fpm.d/vhost.conf
 feedback h3 'Restart PHP-FPM to recognise the additional PHP modules and config'
 systemctl restart php-fpm
-
 
 # Install Speedtest
 feedback h1 'Install Ookla Speedtest'
@@ -565,34 +574,29 @@ RestartSec=15min
 [Install]
 WantedBy=multi-user.target
 EOF
-
 ln -s /opt/ookla/server/ookla-server.service /etc/systemd/system/ookla-server.service
 systemctl daemon-reload
 feedback h3 'Ookla CLI'
 wget https://bintray.com/ookla/rhel/rpm -O bintray-ookla-rhel.repo
 mv bintray-ookla-rhel.repo /etc/yum.repos.d/
-install_pkg 'speedtest'
-
+pkgmgr install 'speedtest'
 
 # Install Ghost Script, a PostScript interpreter and renderer that is used by WordPress for PDFs
 feedback h1 'Install Ghost Script'
-install_pkg 'ghostscript'
-
+pkgmgr install 'ghostscript'
 
 # Install Git to support content versioning in MediaWiki
 feedback h1 'Install Git'
-install_pkg 'git'
-
+pkgmgr install 'git'
 
 # Install the MariaDB client for connecting to Aurora Serverless to manage the databases
 feedback h1 'Install the MariaDB client'
-install_pkg 'mariadb'
-
+pkgmgr install 'mariadb'
 
 # Install MariaDB server to host databases as Aurora Serverless resume is too slow (~25s)
 # This section will only be used for standalone installs. Eventually this will either use a dedicated EC2 running MariaDB or AWS RDS Aurora
 feedback h1 'Install the MariaDB server'
-install_pkg 'mariadb-server'
+pkgmgr install 'mariadb-server'
 ###
 feedback error 'Not starting the database server. Code disabled as its causing yum issues (DB corruption, failed install) for the build script'
 #feedback h3 'Sleep for 5 seconds as the database server wont start immediately after install'
@@ -602,11 +606,10 @@ feedback error 'Not starting the database server. Code disabled as its causing y
 feedback body 'Set it to auto start at boot'
 systemctl enable mariadb
 
-
 # Install the web server
 feedback h1 'Install the web server'
 manage_ale enable 'httpd_modules'
-install_pkg 'httpd mod_ssl'
+pkgmgr install 'httpd mod_ssl'
 feedback h3 'Start the web server'
 systemctl restart httpd
 feedback body 'Set it to auto start at boot'
@@ -615,7 +618,7 @@ systemctl enable httpd
 feedback h2 'Customise the web server config'
 # Install extra modules
 feedback h3 'Install additional Apache HTTPD modules'
-install_pkg 'https://dl-ssl.google.com/dl/linux/direct/mod-pagespeed-stable_current_x86_64.rpm'
+pkgmgr install 'https://dl-ssl.google.com/dl/linux/direct/mod-pagespeed-stable_current_x86_64.rpm'
 # Replace the Apache HTTPD MPM module prefork with the module event for HTTP/2 compatibility and to improve server performance
 feedback h3 'Change MPM modules from prefork to event'
 cp '/etc/httpd/conf.modules.d/00-mpm.conf' '/etc/httpd/conf.modules.d/00-mpm.conf.bak'
@@ -647,7 +650,6 @@ systemctl restart httpd
 feedback h3 'Web server status'
 systemctl -l status httpd.service
 
-
 # Create a DNS entry for the web host
 feedback h1 'Create a DNS entry on Cloudflare for this instance'
 # Cloudflare API secret
@@ -663,17 +665,15 @@ unset cloudflare_api_token
 feedback h3 'Sleeping for 5 seconds to allow that DNS change to replicate'
 sleep 5
 
-
 # Install Let's Encrypt CertBot, requires EPEL
 feedback h1 'Install Lets Encrypt CertBot'
-install_pkg 'certbot python2-certbot-apache'
+pkgmgr install 'certbot python2-certbot-apache'
 # Create and install this instances certificates, these will be kept locally on EBS.  All vhost certificates need to be kept on EFS.
 feedback h2 'Get Lets Encrypt certificates for this server'
 # The contact email address for Lets Encrypt if a certificate problem comes up
 pki_email=`aws ssm get-parameter --name "${app_parameters}/pki_email" --query 'Parameter.Value' --output text --region ${aws_region}`
 mkdir --parents "/var/log/letsencrypt"
 certbot certonly --domains "${instance_id}.${hosting_domain},web2.${hosting_domain}" --apache --non-interactive --agree-tos --email "${pki_email}" --no-eff-email --logs-dir "/var/log/letsencrypt" --redirect --must-staple --staple-ocsp --hsts --uir
-
 
 # Customise the _default_ vhost config to include the new certificate created by certbot
 if [[ -f "/etc/letsencrypt/live/${instance_id}.${hosting_domain}/fullchain.pem" && -f "/etc/letsencrypt/live/${instance_id}.${hosting_domain}/privkey.pem" ]]
@@ -698,7 +698,6 @@ echo '# Run Lets Encrypt Certbot to revoke and/or renew certiicates' >> /etc/cro
 echo 'certbot renew --no-self-upgrade' >> /etc/cron.daily/certbot
 chmod 0770 /etc/cron.daily/certbot
 systemctl restart crond
-
 
 # Thats all I wrote
 feedback title "Build script finished - https://${instance_id}.${hosting_domain}/wiki/"
