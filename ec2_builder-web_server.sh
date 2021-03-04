@@ -296,7 +296,11 @@ then
   instance_id=`ec2-metadata --instance-id | cut -c 14-`
   aws_region=`ec2-metadata --availability-zone | cut -c 12-20`
 else
-  feedback error "Can't find ec2metadata or ec2-metadata, assuming us-east-1 and no instance ID"
+  feedback error "Can't find ec2metadata or ec2-metadata"
+fi
+if [ "${aws_region}" == '' ]
+then
+  feedback error "AWS region not set, assuming us-east-1"
   aws_region='us-east-1'
 fi
 
