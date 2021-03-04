@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.2.5-20210304
+# Version:      0.2.7-20210304
 # File:         ec2_builder-launch.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -114,7 +114,7 @@ fi
 
 feedback h1 'Setting up'
 
-feedback body 'Get the EC2 instance ID and AWS region'
+feedback h3 'Get the EC2 instance ID and AWS region'
 # The initial AWS region setting using the instances placement so that we can connect to the AWS SSM parameter store
 if [ -f '/usr/bin/ec2metadata' ]
 then
@@ -132,6 +132,7 @@ then
   feedback error "AWS region not set, assuming us-east-1"
   aws_region='us-east-1'
 fi
+feedback body "Instance ${instance_id} is in the ${aws_region} region"
 
 # Configuration parameters are held in AWS Systems Manager Parameter Store, retrieving these using the AWC CLI. Permissions are granted to do this using a IAM role assigned to the instance
 # Delete the AWS credentials file so that the AWS CLI uses the instances profile/role permissions
@@ -139,9 +140,6 @@ if [ -f '/root/.aws/credentials' ]
 then
   rm --force '/root/.aws/credentials'
 fi
-
-# Connect to AWS SSM Parameter Store to see what region we should be using
-aws_region=`aws ssm get-parameter --name "${app_parameters}/awscli/aws_region" --query 'Parameter.Value' --output text --region ${aws_region}`
 
 # These are just to download the build script, the build script defines its own tenancy, environment, and build definition
 feedback body 'Get the tenancy and environment from the instance tags'

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.43-20210304
+# Version:      0.7.44-20210304
 # File:         ec2_builder-web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -285,7 +285,7 @@ fi
 
 feedback h1 'Setting up'
 
-feedback body 'Get the EC2 instance ID and AWS region'
+feedback h3 'Get the EC2 instance ID and AWS region'
 # The initial AWS region setting using the instances placement so that we can connect to the AWS SSM parameter store
 if [ -f '/usr/bin/ec2metadata' ]
 then
@@ -303,6 +303,7 @@ then
   feedback error "AWS region not set, assuming us-east-1"
   aws_region='us-east-1'
 fi
+feedback body "Instance ${instance_id} is in the ${aws_region} region"
 
 # Configuration parameters are held in AWS Systems Manager Parameter Store, retrieving these using the AWC CLI. Permissions are granted to do this using a IAM role assigned to the instance
 # Delete the AWS credentials file so that the AWS CLI uses the instances profile/role permissions
@@ -310,9 +311,6 @@ if [ -f '/root/.aws/credentials' ]
 then
   rm --force '/root/.aws/credentials'
 fi
-
-# Connect to AWS SSM Parameter Store to see what region we should be using
-aws_region=`aws ssm get-parameter --name "${app_parameters}/awscli/aws_region" --query 'Parameter.Value' --output text --region ${aws_region}`
 
 # These are just to download the build script, the build script defines its own tenancy, environment, and build definition
 feedback body 'Get the tenancy and environment from the instance tags'
@@ -330,6 +328,9 @@ feedback body 'Get the service group'
 service_group=`aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == 'service_group'].Value" --output text --region ${aws_region}`
 # Define the parameter store structure
 app_parameters="/${tenancy}/${resource_environment}/${service_group}/${build_app}"
+
+# Connect to AWS SSM Parameter Store to see what region we should be using
+aws_region=`aws ssm get-parameter --name "${app_parameters}/awscli/aws_region" --query 'Parameter.Value' --output text --region ${aws_region}`
 
 #======================================
 # Declare the variables
@@ -374,6 +375,12 @@ KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-grou
 Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr
 MACs hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com,umac-128-etm@openssh.com
 ***EOF***
+
+
+
+#### Create mike user, require my key to auth
+
+
 feedback h3 'Restart OpenSSH server'
 systemctl restart sshd
 
