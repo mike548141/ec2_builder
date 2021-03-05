@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.2.13-20210305
+# Version:      0.2.14-20210306
 # File:         ec2_builder-launch.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -92,19 +92,6 @@ feedback body "Started: $(date)"
 #======================================
 # Declare the constants
 #--------------------------------------
-# Get to know the OS so we can support AL2 and Ubuntu
-hostos_id=$(grep '^ID=' /etc/os-release | sed 's|"||g; s|^ID=||;')
-hostos_ver=$(grep '^VERSION_ID=' /etc/os-release | sed 's|"||g; s|^VERSION_ID=||;')
-if [ -f '/usr/bin/apt' ]
-then
-  hostos_pkgmgr='apt'
-elif [ -f '/usr/bin/yum' ]
-then
-  hostos_pkgmgr='yum'
-else
-  feedback error 'Package manager not found'
-fi
-
 # AWS CLI
 if [ ! -f '/usr/bin/aws' ] && [ -f '/usr/bin/apt' ]
 then
@@ -129,22 +116,14 @@ then
 else
   feedback error "Can't find ec2metadata or ec2-metadata"
 fi
-if [ "${aws_region}" == '' ]
+if [ -z "${aws_region}" ]
 then
   feedback error "AWS region not set, assuming us-east-1"
   aws_region='us-east-1'
 fi
 feedback body "Instance ${instance_id} is in the ${aws_region} region"
 
-# Configuration parameters are held in AWS Systems Manager Parameter Store, retrieving these using the AWC CLI. Permissions are granted to do this using a IAM role assigned to the instance
-# Delete the AWS credentials file so that the AWS CLI uses the instances profile/role permissions
-if [ -f '/root/.aws/credentials' ]
-then
-  rm --force '/root/.aws/credentials'
-fi
-
-# These are just to download the build script, the build script defines its own tenancy, environment, and build definition
-# What does the world look like around the instance
+# What does the world around the instance look like
 feedback body 'Get the tenancy and environment from the instance tags'
 tenancy=$(aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == 'tenancy'].Value" --output text --region ${aws_region})
 resource_environment=$(aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == 'resource_environment'].Value" --output text --region ${aws_region})

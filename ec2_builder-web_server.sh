@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.51-20210305
+# Version:      0.7.52-20210306
 # File:         ec2_builder-web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -180,11 +180,11 @@ get_public_ip () {
 # Install an app using yum
 pkgmgr () {
   # Check that the package manager is not already running
-  check_pid_lock ${hostos_pkgmgr}
+  check_pid_lock ${packmgr}
   case ${1} in
   update)
     feedback h2 'Package manager update'
-    case ${hostos_pkgmgr} in
+    case ${packmgr} in
     apt)
       apt update
       local exit_code=${?}
@@ -197,7 +197,7 @@ pkgmgr () {
     ;;
   upgrade)
     feedback h2 'Upgrade installed packages'
-    case ${hostos_pkgmgr} in
+    case ${packmgr} in
     apt)
       apt --assume-yes upgrade
       local exit_code=${?}
@@ -210,7 +210,7 @@ pkgmgr () {
     ;;
   install)
     feedback h2 "Install ${2}"
-    case ${hostos_pkgmgr} in
+    case ${packmgr} in
     apt)
       apt --assume-yes install ${2}
       local exit_code=${?}
@@ -220,6 +220,7 @@ pkgmgr () {
       local exit_code=${?}
       ;;
     esac
+    #### Check each package in the array was installed
     ;;
   *)
     feedback error "The package manager function can not understand the command ${1}"
@@ -227,10 +228,10 @@ pkgmgr () {
   esac
   if [ ${exit_code} -ne 0 ]
   then
-    feedback error "${hostos_pkgmgr} exit code ${exit_code}"
+    feedback error "${packmgr} exit code ${exit_code}"
   fi
   # Wait for the package manager to terminate
-  check_pid_lock ${hostos_pkgmgr}
+  check_pid_lock ${packmgr}
 }
 ## I don't really want this type of error handling anymore but the code is useful reference
 #feedback body 'Retrying install in 60 seconds'
@@ -254,11 +255,12 @@ pkgmgr () {
 
 # Wrap the amazon_linux_extras script with additional steps
 manage_ale () {
-  if [ "${hostos_id}" == 'amzn' ]
-  then
+  case ${hostos_id} in
+  amzn)
     amazon-linux-extras ${1} ${2}
     yum clean metadata
-  fi
+    ;;
+  esac
 }
 
 #======================================
@@ -290,10 +292,10 @@ hostos_id=$(grep '^ID=' /etc/os-release | sed 's|"||g; s|^ID=||;')
 hostos_ver=$(grep '^VERSION_ID=' /etc/os-release | sed 's|"||g; s|^VERSION_ID=||;')
 if [ -f '/usr/bin/apt' ]
 then
-  hostos_pkgmgr='apt'
+  packmgr='apt'
 elif [ -f '/usr/bin/yum' ]
 then
-  hostos_pkgmgr='yum'
+  packmgr='yum'
 else
   feedback error 'Package manager not found'
 fi
@@ -336,7 +338,7 @@ then
   rm --force '/root/.aws/credentials'
 fi
 
-# What does the world look like around the instance
+# What does the world around the instance look like
 feedback body 'Get the tenancy and environment from the instance tags'
 tenancy=$(aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == 'tenancy'].Value" --output text --region ${aws_region})
 resource_environment=$(aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == 'resource_environment'].Value" --output text --region ${aws_region})
@@ -365,18 +367,27 @@ get_public_ip
 # Lets get into it
 #--------------------------------------
 # Add access to Extra Packages for Enterprise Linux (EPEL) from the Fedora project
-if [ "${hostos_id}" == 'amzn' ]
-then
+case ${hostos_id} in
+amzn)
   feedback h1 'Add access to Extra Packages for Enterprise Linux (EPEL) from the Fedora project'
   manage_ale enable 'epel'
   pkgmgr install 'epel-release'
-fi
+  ;;
+esac
 
 # Update the software stack
 feedback h1 'Update the software stack'
 pkgmgr update
 pkgmgr upgrade
 systemctl daemon-reload
+
+case ${packmgr} in
+apt)
+  # Debian (Ubuntu) tools to automate package installations that are interactive
+  feedback h1 'Install debconf tools'
+  pkgmgr install 'debconf-utils'
+  ;;
+esac
 
 # Configure the OpenSSH server
 feedback h1 'Harden the OpenSSH daemon'
@@ -406,9 +417,10 @@ sed -i 's|^HostKey /etc/ssh/ssh_host_dsa_key$|#HostKey /etc/ssh/ssh_host_dsa_key
 sed -i 's|^HostKey /etc/ssh/ssh_host_ecdsa_key$|#HostKey /etc/ssh/ssh_host_ecdsa_key|g' '/etc/ssh/sshd_config'
 # Child configs for SSHD
 mkdir --parents /etc/ssh/sshd_config.d/
-if [ -z "$(grep -v '.*#' '/etc/ssh/sshd_config' | grep -i 'Include \/etc\/ssh\/sshd_config\.d\/\*\.conf')" ]
+if [ -z "$(grep -i 'Include \/etc\/ssh\/sshd_config\.d\/\*\.conf' '/etc/ssh/sshd_config')" ]
 then
   ## Ubuntu has this by default, AL2's version of openssh-server (7.4p1-21.amzn2.0.1) does not support it
+  feedback error 'SSHD child config added to /etc/ssh/sshd_config but commented out. Please uncomment and restart the service to complete the hardening of SSHD'
   echo '#Include /etc/ssh/sshd_config.d/*.conf' >> '/etc/ssh/sshd_config'
 fi
 # Use the cipher tech that we trust, tested against https://www.sshaudit.com/
@@ -458,6 +470,20 @@ feedback h3 'Restart OpenSSH server'
 systemctl restart sshd.service
 systemctl -l status sshd.service
 
+# Configure sudo on the host to allow members of the group sudo. This is default on Ubuntu
+feedback h1 'Configure sudo'
+if [ -z "$(getent group 'sudo')" ]
+then
+  feedback body 'Create sudo group'
+  groupadd --gid 27 'sudo'
+fi
+if [ -z "$(grep '^%sudo.*ALL=(ALL:ALL) ALL' '/etc/sudoers')" ]
+then
+  feedback body 'Give the sudo group permissions'
+  echo '# Allow members of group sudo to execute any command' > '/etc/sudoers.d/group-sudo'
+  echo '%sudo   ALL=(ALL:ALL) ALL' >> '/etc/sudoers.d/group-sudo'
+fi
+
 # Create the local users on the host
 ## This should really link back to a central user repo and users get created dynamically
 feedback h1 'Create the user mike and a home directory'
@@ -471,14 +497,21 @@ chmod 0700 '/home/mike/.ssh'
 wget --tries=2 -O '/home/mike/.ssh/authorized_keys' 'https://cakeit.nz/identity/mike.clements/mike-ssh.pub'
 chmod 0600 '/home/mike/.ssh/authorized_keys'
 
-# Additional AWS EC2 tools, only applicable to Ubuntu
+# Additional AWS EC2 tools
 feedback h1 'Install AWS tools'
-pkgmgr install 'ec2-ami-tools'
+case ${hostos_id} in
+ubuntu)
+  pkgmgr install 'ec2-ami-tools'
+  ;;
+amzn)
+  feedback body 'No tools to add'
+  ;;
+esac
 
 # Install the management agents
 feedback h1 'System management agents'
 # The AWS SSM agent is installed by default on both AL2 and Ubuntu (as a snap package) AMI's
-# These packages are not required
+# The following packages are not required yet
 #manage_ale enable 'ansible2'
 #pkgmgr install 'ansible'
 #manage_ale enable 'rust1'
@@ -490,31 +523,54 @@ feedback h1 'System management agents'
 # Install security apps
 feedback h1 'Install security apps to protect the host'
 pkgmgr install 'fail2ban'
+# rkhunter
+case ${packmgr} in
+apt)
+  # Automate the postfix package install by selecting No configuration. Postfix is pulled in as a dependency of rkhunter
+  echo 'postfix	postfix/main_mailer_type	select	No configuration' | debconf-set-selections
+  ;;
+esac
 pkgmgr install 'rkhunter'
-### remove ui prompts
+# tripwire
+case ${packmgr} in
+apt)
+  # Automate the tripwire package install
+  echo 'tripwire	tripwire/use-sitekey	boolean	false' | debconf-set-selections
+  echo 'tripwire	tripwire/use-localkey	boolean	false' | debconf-set-selections
+  echo 'tripwire	tripwire/installed	note	' | debconf-set-selections
+  ;;
+esac
 pkgmgr install 'tripwire'
 # SELinux
 pkgmgr install 'policycoreutils'
-if [ "${hostos_id}" == 'ubuntu' ]
-then
+case ${hostos_id} in
+ubuntu)
   pkgmgr install 'selinux-basics'
   selinux-activate
-elif [ "${hostos_id}" == 'amzn' ]
-then
+  ;;
+amzn)
   pkgmgr install 'policycoreutils-python selinux-policy selinux-policy-targeted'
-fi
+  ;;
+esac
 sestatus
-# By installing the plugins package it will pull in the relevant package for Linux system auditing i.e. auditd for Ubuntu and audit for AL2
-pkgmgr install 'audispd-plugins'
+# Linux system auditing
+case ${hostos_id} in
+ubuntu)
+  pkgmgr install 'auditd audispd-plugins'
+  ;;
+amzn)
+  pkgmgr install 'audit audispd-plugins'
+  ;;
+esac
 # OS Query
 feedback h3 'Add the osquery repo and trust the GPG key'
-case ${hostos_pkgmgr} in
+case ${packmgr} in
 apt)
   apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 1484120AC4E9F8A1A577AEEE97A80C63C9D8B80B
   add-apt-repository 'deb [arch=amd64] https://pkg.osquery.io/deb deb main'
   ;;
 yum)
-  curl -L https://pkg.osquery.io/rpm/GPG | sudo tee /etc/pki/rpm-gpg/RPM-GPG-KEY-osquery
+  curl -L https://pkg.osquery.io/rpm/GPG | tee /etc/pki/rpm-gpg/RPM-GPG-KEY-osquery
   rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-osquery
   yum-config-manager --add-repo https://pkg.osquery.io/rpm/osquery-s3-rpm.repo
   yum-config-manager --enable osquery-s3-rpm
@@ -523,9 +579,16 @@ esac
 pkgmgr update
 pkgmgr install 'osquery'
 
-# Google Authenticator adds MFA capability to PAM - https://aws.amazon.com/blogs/startups/securing-ssh-to-amazon-ec2-linux-hosts/
+# Google Authenticator adds MFA capability to PAM - https://aws.amazon.com/blogs/startups/securing-ssh-to-amazon-ec2-linux-hosts/ and https://ubuntu.com/tutorials/configure-ssh-2fa#2-installing-and-configuring-required-packages
 feedback h1 'Google Authenticator to support MFA'
-pkgmgr install 'google-authenticator'
+case ${packmgr} in
+apt)
+  pkgmgr install 'libpam-google-authenticator'
+  ;;
+yum)
+  pkgmgr install 'google-authenticator'
+  ;;
+esac
 
 # General tools
 feedback h1 'General tools'
@@ -533,14 +596,23 @@ feedback h1 'General tools'
 pkgmgr install 'ethtool'
 # System monitoring
 pkgmgr install 'stacer sysstat iotop'
+# Install Git to install Amazon EFS helper, support content versioning in MediaWiki, and general use
+pkgmgr install 'git'
 # Install the MariaDB client for connecting to Aurora Serverless to manage the databases
-pkgmgr install 'mariadb'
+case ${hostos_id} in
+ubuntu)
+  pkgmgr install 'mariadb-client'
+  ;;
+amzn)
+  pkgmgr install 'mariadb'
+  ;;
+esac
 # Ookla speedtest client
 feedback h2 'Ookla client repo'
-case ${hostos_pkgmgr} in
+case ${packmgr} in
 apt)
   apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 379CE192D401AB61
-  echo "deb https://ookla.bintray.com/debian generic main" | sudo tee  /etc/apt/sources.list.d/speedtest.list
+  echo "deb https://ookla.bintray.com/debian generic main" | tee  /etc/apt/sources.list.d/speedtest.list
   ;;
 yum)
   wget --tries=2 https://bintray.com/ookla/rhel/rpm -O bintray-ookla-rhel.repo
@@ -553,7 +625,19 @@ pkgmgr install 'speedtest'
 
 # Install AWS EFS helper and mount the EFS volume for vhost data
 feedback h1 'AWS EFS helper'
-pkgmgr install 'amazon-efs-utils'
+case ${packmgr} in
+apt)
+  mkdir --parents '/opt/aws'
+  cd '/opt/aws'
+  git clone https://github.com/aws/efs-utils
+  cd '/opt/aws/efs-utils'
+  ./build-deb.sh
+  pkgmgr install ./build/amazon-efs-utils*deb
+  ;;
+yum)
+  pkgmgr install 'amazon-efs-utils'
+  ;;
+esac
 feedback h3 'Mount the EFS volume for vhost data'
 # The AWS EFS volume and mount point used to hold virtual host config, content and logs that is shared between web hosts (aka instances)
 efs_volume=$(aws ssm get-parameter --name "${app_parameters}/efs_volume" --query 'Parameter.Value' --output text --region ${aws_region})
@@ -584,9 +668,9 @@ mkdir --parents "${vhost_root}/_default_/log/${instance_id}.${hosting_domain}"
 feedback h1 'Configure local users and groups to match those on EFS'
 # Groups
 feedback h3 'Create groups'
-groupadd --gid 1001 vhost_all
-groupadd --gid 1002 vhost_owners
-groupadd --gid 1003 vhost_users
+groupadd --gid 2001 vhost_all
+groupadd --gid 2002 vhost_owners
+groupadd --gid 2003 vhost_users
 # Users
 feedback h3 'Create users'
 for vhost_dir in ${vhost_dir_list}
@@ -614,7 +698,14 @@ aws configure set output ${aws_cli_output}
 
 # Install Fuse S3FS and mount the S3 bucket for web server data - https://github.com/s3fs-fuse/s3fs-fuse
 feedback h1 'Fuse S3FS'
-pkgmgr install 's3fs-fuse'
+case ${hostos_id} in
+ubuntu)
+  pkgmgr install 's3fs'
+  ;;
+amzn)
+  pkgmgr install 's3fs-fuse'
+  ;;
+esac
 feedback h3 'Configure FUSE'
 sed -i 's|^# user_allow_other$|user_allow_other|' /etc/fuse.conf
 feedback h3 'Configure AWS CLI credentials for the root user, S3FS uses the same file'
@@ -647,12 +738,15 @@ feedback h1 'Install scripting languages'
 pkgmgr install 'python python3'
 pkgmgr install 'golang'
 pkgmgr install 'ruby'
-pkgmgr install 'nodejs'
+pkgmgr install 'nodejs npm'
 # PHP
 manage_ale enable 'php7.3'
-pkgmgr install 'php-cli php-pdo php-fpm php-json php-mysqlnd php-common'
-# Customise the PHP config
-pkgmgr install 'php-bcmath php-gd php-intl php-mbstring php-pecl-apcu php-pecl-imagick php-pecl-libsodium php-pecl-zip php-xml'
+pkgmgr install 'php-cli php-fpm php-common php-pdo php-json php-mysqlnd php-bcmath php-gd php-intl php-mbstring php-xml php-pear'
+case ${hostos_id} in
+amzn)
+  pkgmgr install 'php-pecl-apcu php-pecl-imagick php-pecl-libsodium php-pecl-zip'
+  ;;
+esac
 # Create a PHP config for the _default_ vhost
 feedback h3 'Create a PHP-FPM config on EBS for this instances _default_ vhost'
 cp "${vhost_root}/_default_/conf/instance-specific-php-fpm.conf" /etc/php-fpm.d/this-instance.conf
@@ -671,35 +765,42 @@ systemctl -l status php-fpm.service
 # This section will only be used for standalone installs. Eventually this will either use a dedicated EC2 running MariaDB or AWS RDS Aurora
 feedback h1 'MariaDB (MySQL) server'
 pkgmgr install 'mariadb-server'
-###
-feedback error 'Not starting the database server. Code disabled as its causing yum issues (DB corruption, failed install) for the build script'
-#feedback h3 'Sleep for 5 seconds as the database server wont start immediately after install'
-#sleep 5
-#feedback h3 'Start the database server'
-#systemctl restart mariadb
 feedback body 'Set it to auto start at boot'
-systemctl enable mariadb
+systemctl enable mariadb.service
+feedback h3 'Start the database server'
+systemctl restart mariadb.service
 
 # Install the web server
 feedback h1 'Install the web server'
-manage_ale enable 'httpd_modules'
-pkgmgr install 'httpd mod_ssl'
-feedback h3 'Start the web server'
-systemctl restart httpd
+case ${hostos_id} in
+ubuntu)
+  pkgmgr install 'apache2 apache2-doc apache2-suexec-pristine'
+  httpd_daemon='apache2.service'
+  ;;
+amzn)
+  manage_ale enable 'httpd_modules'
+  pkgmgr install 'httpd mod_ssl'
+  httpd_daemon='httpd.service'
+  ;;
+esac
 feedback body 'Set it to auto start at boot'
-systemctl enable httpd
-# Customise the web server
-feedback h2 'Customise the web server config'
-# Install extra modules
-feedback h3 'Install additional Apache HTTPD modules'
-case ${hostos_pkgmgr} in
+systemctl enable ${httpd_daemon}
+feedback h3 'Start the web server'
+systemctl restart ${httpd_daemon}
+feedback h2 'PageSpeed'
+case ${packmgr} in
 apt)
-  pkgmgr install 'https://dl-ssl.google.com/dl/linux/direct/mod-pagespeed-stable_current_amd64.deb'
+  cd ~
+  wget 'https://dl-ssl.google.com/dl/linux/direct/mod-pagespeed-stable_current_amd64.deb'
+  chown _apt:root './mod-pagespeed-stable_current_amd64.deb'
+  pkgmgr install './mod-pagespeed-stable_current_amd64.deb'
+  rm './mod-pagespeed-stable_current_amd64.deb'
   ;;
 yum)
   pkgmgr install 'https://dl-ssl.google.com/dl/linux/direct/mod-pagespeed-stable_current_x86_64.rpm'
   ;;
 esac
+#### /etc/httpd vs /etc/apache2
 # Replace the Apache HTTPD MPM module prefork with the module event for HTTP/2 compatibility and to improve server performance
 feedback h3 'Change MPM modules from prefork to event'
 cp '/etc/httpd/conf.modules.d/00-mpm.conf' '/etc/httpd/conf.modules.d/00-mpm.conf.bak'
@@ -729,21 +830,21 @@ then
   touch '/etc/letsencrypt/options-ssl-apache.conf'
 fi
 feedback h3 'Restart the web server'
-systemctl restart httpd.service
+systemctl restart ${httpd_daemon}
 feedback h3 'Web server status'
-systemctl -l status httpd.service
+systemctl -l status ${httpd_daemon}
 
 feedback h1 'Web hosting software'
 # Install Ghost Script, a PostScript interpreter and renderer that is used by WordPress for PDFs
 pkgmgr install 'ghostscript'
-# Install Git to support content versioning in MediaWiki
-pkgmgr install 'git'
 
 # Get the AWS Elastic IP address used to web host
 eip_allocation_id=$(aws ssm get-parameter --name "${app_parameters}/eip_allocation_id" --query 'Parameter.Value' --output text --region ${aws_region})
 # If the variable is blank then don't assign an EIP, assume there is a load balancer instead
 if [ -z "${eip_allocation_id}" ]
 then
+  feedback h1 'EIP variable is blank, I assume the IP address for web2.cakeit.nz is bound to a load balancer'
+else
   # Allocate the AWS EIP to this instance
   feedback h1 'Allocate the EIP public IP address to this instance'
   # Allocate the EIP
@@ -775,7 +876,15 @@ sleep 5
 
 # Install Let's Encrypt CertBot
 feedback h1 'Lets Encrypt CertBot'
-pkgmgr install 'certbot python2-certbot-apache'
+pkgmgr install 'certbot'
+case ${hostos_id} in
+ubuntu)
+  pkgmgr install 'python3-certbot-apache python-certbot-doc'
+  ;;
+amzn)
+  pkgmgr install 'python2-certbot-apache'
+  ;;
+esac
 # Create and install this instances certificates, these will be kept locally on EBS.  All vhost certificates need to be kept on EFS.
 feedback h2 'Get Lets Encrypt certificates for this server'
 # The contact email address for Lets Encrypt if a certificate problem comes up
@@ -793,7 +902,7 @@ then
           s|#SSLCertificateFile[ \t]*/etc/letsencrypt/live/|SSLCertificateFile\t\t/etc/letsencrypt/live/|; \
           s|#SSLCertificateKeyFile[ \t]*/etc/letsencrypt/live/|SSLCertificateKeyFile\t\t/etc/letsencrypt/live/|;" '/etc/httpd/conf.d/this-instance.conf'
   feedback h3 'Restart the web server'
-  systemctl restart httpd
+  systemctl restart ${httpd_daemon}
 fi
 # Link each of the vhosts listed in vhosts-httpd.conf to letsencrypt on this instance. So that all instances can renew all certificates as required
 feedback h3 'Include the vhosts Lets Encrypt config on this server'
@@ -810,7 +919,14 @@ ${efs_mount_point}/script/update_instance-vhosts_pki.sh
 certbot renew --no-self-upgrade
 ***EOF***
 chmod 0770 /etc/cron.daily/certbot
-systemctl restart crond
+case ${hostos_id} in
+ubuntu)
+  systemctl restart cron.service
+  ;;
+amzn)
+  systemctl restart crond.service
+  ;;
+esac
 
 # Install Ookla Speedtest server
 feedback h1 'Ookla speedtest server'
@@ -855,3 +971,5 @@ systemctl daemon-reload
 
 # Thats all I wrote
 feedback title "Build script finished - https://${instance_id}.${hosting_domain}/wiki/"
+
+### reboot
