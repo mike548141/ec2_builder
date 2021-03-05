@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.52-20210306
+# Version:      0.7.53-20210306
 # File:         ec2_builder-web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -541,18 +541,17 @@ apt)
   ;;
 esac
 pkgmgr install 'tripwire'
-# SELinux
-pkgmgr install 'policycoreutils'
+# Linux security module
 case ${hostos_id} in
 ubuntu)
-  pkgmgr install 'selinux-basics'
-  selinux-activate
+  pkgmgr install 'apparmor apparmor-utils apparmor-profiles apparmor-profiles-extra'
   ;;
 amzn)
-  pkgmgr install 'policycoreutils-python selinux-policy selinux-policy-targeted'
+  pkgmgr install 'policycoreutils policycoreutils-python selinux-policy selinux-policy-targeted'
+  ##selinux-activate
+  sestatus
   ;;
 esac
-sestatus
 # Linux system auditing
 case ${hostos_id} in
 ubuntu)
@@ -791,7 +790,7 @@ feedback h2 'PageSpeed'
 case ${packmgr} in
 apt)
   cd ~
-  wget 'https://dl-ssl.google.com/dl/linux/direct/mod-pagespeed-stable_current_amd64.deb'
+  wget --tries=2 'https://dl-ssl.google.com/dl/linux/direct/mod-pagespeed-stable_current_amd64.deb'
   chown _apt:root './mod-pagespeed-stable_current_amd64.deb'
   pkgmgr install './mod-pagespeed-stable_current_amd64.deb'
   rm './mod-pagespeed-stable_current_amd64.deb'
