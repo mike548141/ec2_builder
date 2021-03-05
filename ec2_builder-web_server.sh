@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.50-20210305
+# Version:      0.7.51-20210305
 # File:         ec2_builder-web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -271,9 +271,9 @@ then
   hostos_pretty=$(grep '^PRETTY_NAME=' /etc/os-release | sed 's|"||g; s|^PRETTY_NAME=||;')
   feedback body "Script: ${0}"
   feedback body "Script version: ${script_ver}"
-  feedback body "Host OS: ${hostos_pretty}"
+  feedback body "OS: ${hostos_pretty}"
+  feedback body "User: $(whoami)"
   feedback body "Shell: $(readlink /proc/$$/exe)"
-  feedback body "Running as user: $(whoami)"
   feedback body "Started: $(date)"
 else
   feedback error 'Exiting because you did not use the special word'
@@ -408,7 +408,8 @@ sed -i 's|^HostKey /etc/ssh/ssh_host_ecdsa_key$|#HostKey /etc/ssh/ssh_host_ecdsa
 mkdir --parents /etc/ssh/sshd_config.d/
 if [ -z "$(grep -v '.*#' '/etc/ssh/sshd_config' | grep -i 'Include \/etc\/ssh\/sshd_config\.d\/\*\.conf')" ]
 then
-  echo 'Include /etc/ssh/sshd_config.d/*.conf' >> '/etc/ssh/sshd_config'
+  ## Ubuntu has this by default, AL2's version of openssh-server (7.4p1-21.amzn2.0.1) does not support it
+  echo '#Include /etc/ssh/sshd_config.d/*.conf' >> '/etc/ssh/sshd_config'
 fi
 # Use the cipher tech that we trust, tested against https://www.sshaudit.com/
 feedback h3 'Restrict the key exchanges, ciphers, and MAC algorithms supported'
@@ -467,7 +468,7 @@ feedback h3 'Add SSH key'
 mkdir --parents '/home/mike/.ssh'
 chown mike:mike '/home/mike/.ssh'
 chmod 0700 '/home/mike/.ssh'
-wget -O '/home/mike/.ssh/authorized_keys' 'https://cakeit.nz/identity/mike.clements/mike-ssh.pub'
+wget --tries=2 -O '/home/mike/.ssh/authorized_keys' 'https://cakeit.nz/identity/mike.clements/mike-ssh.pub'
 chmod 0600 '/home/mike/.ssh/authorized_keys'
 
 # Additional AWS EC2 tools, only applicable to Ubuntu
@@ -542,7 +543,7 @@ apt)
   echo "deb https://ookla.bintray.com/debian generic main" | sudo tee  /etc/apt/sources.list.d/speedtest.list
   ;;
 yum)
-  wget https://bintray.com/ookla/rhel/rpm -O bintray-ookla-rhel.repo
+  wget --tries=2 https://bintray.com/ookla/rhel/rpm -O bintray-ookla-rhel.repo
   mv bintray-ookla-rhel.repo /etc/yum.repos.d/
   ;;
 esac
@@ -738,17 +739,21 @@ pkgmgr install 'ghostscript'
 # Install Git to support content versioning in MediaWiki
 pkgmgr install 'git'
 
-# Allocate the AWS EIP to this instance
-feedback h1 'Allocate the EIP public IP address to this instance'
 # Get the AWS Elastic IP address used to web host
 eip_allocation_id=$(aws ssm get-parameter --name "${app_parameters}/eip_allocation_id" --query 'Parameter.Value' --output text --region ${aws_region})
-# Allocate the EIP
-aws ec2 associate-address --instance-id ${instance_id} --allocation-id ${eip_allocation_id} --region ${aws_region}
-# Update the public IP address assigned now the EIP is associated
-feedback body 'Sleep for 5 seconds to allow metadata to update after the EIP association'
-sleep 5
-get_public_ip
-feedback body "EIP address ${public_ipv4} associated"
+# If the variable is blank then don't assign an EIP, assume there is a load balancer instead
+if [ -z "${eip_allocation_id}" ]
+then
+  # Allocate the AWS EIP to this instance
+  feedback h1 'Allocate the EIP public IP address to this instance'
+  # Allocate the EIP
+  aws ec2 associate-address --instance-id ${instance_id} --allocation-id ${eip_allocation_id} --region ${aws_region}
+  # Update the public IP address assigned now the EIP is associated
+  feedback body 'Sleep for 5 seconds to allow metadata to update after the EIP association'
+  sleep 5
+  get_public_ip
+  feedback body "EIP address ${public_ipv4} associated"
+fi
 
 # Create a DNS entry for the web host
 feedback h1 'Create a DNS entry on Cloudflare for this instance'
@@ -811,7 +816,7 @@ systemctl restart crond
 feedback h1 'Ookla speedtest server'
 mkdir --parents '/opt/ookla/server'
 cd /opt/ookla/server/
-wget http://install.speedtest.net/ooklaserver/stable/OoklaServer.tgz
+wget --tries=2 http://install.speedtest.net/ooklaserver/stable/OoklaServer.tgz
 tar -xzvf OoklaServer.tgz OoklaServer-linux64.tar
 rm --force OoklaServer.tgz
 tar -xzvf OoklaServer-linux64.tar

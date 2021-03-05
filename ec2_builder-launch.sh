@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.2.12-20210305
+# Version:      0.2.13-20210305
 # File:         ec2_builder-launch.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -84,9 +84,9 @@ script_ver=$(grep '^# Version:[ \t]*' ${0} | sed 's|# Version:[ \t]*||')
 hostos_pretty=$(grep '^PRETTY_NAME=' /etc/os-release | sed 's|"||g; s|^PRETTY_NAME=||;')
 feedback body "Script: ${0}"
 feedback body "Script version: ${script_ver}"
-feedback body "Host OS: ${hostos_pretty}"
+feedback body "OS: ${hostos_pretty}"
+feedback body "User: $(whoami)"
 feedback body "Shell: $(readlink /proc/$$/exe)"
-feedback body "Running as user: $(whoami)"
 feedback body "Started: $(date)"
 
 #======================================
