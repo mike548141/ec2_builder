@@ -258,7 +258,7 @@ build_app=$(aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && R
 feedback body 'Get the service group'
 service_group=$(aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == 'service_group'].Value" --output text --region ${aws_region})
 # Define the parameter store structure
-app_parameters="/${tenancy}/${resource_environment}/${service_group}/${build_app}"
+app_parameters="/${tenancy}/${resource_environment}/${service_group}"
 
 # Connect to AWS SSM Parameter Store to see what region we should be using
 aws_region=$(aws ssm get-parameter --name "${app_parameters}/awscli/aws_region" --query 'Parameter.Value' --output text --region ${aws_region})
@@ -268,11 +268,11 @@ hosting_domain=$(aws ssm get-parameter --name "${app_parameters}/hosting_domain"
 # The AWS EFS mount point used to hold virtual host config, content and logs that is shared between web hosts (aka instances)
 efs_mount_point=$(aws ssm get-parameter --name "${app_parameters}/efs_mount_point" --query 'Parameter.Value' --output text --region ${aws_region})
 # The AWS S3 mount point used to hold web content that is shared between web hosts, not currently used but is cheaper than EFS
-s3_mount_point=$(aws ssm get-parameter --name "${app_parameters}/s3_mount_point" --query 'Parameter.Value' --output text --region ${aws_region})
+s3_mount_point=$(aws ssm get-parameter --name "${app_parameters}/s3fs/mount_point" --query 'Parameter.Value' --output text --region ${aws_region})
 # The root directory that all the vhosts folders are within
-vhost_root=$(aws ssm get-parameter --name "${app_parameters}/vhost_root" --query 'Parameter.Value' --output text --region ${aws_region})
+vhost_root=$(aws ssm get-parameter --name "${app_parameters}/vhost/root" --query 'Parameter.Value' --output text --region ${aws_region})
 # The web servers config file that includes each of the individual vhosts
-vhost_httpd_conf=$(aws ssm get-parameter --name "${app_parameters}/vhost_httpd_conf" --query 'Parameter.Value' --output text --region ${aws_region})
+vhost_httpd_conf=$(aws ssm get-parameter --name "${app_parameters}/vhost/httpd_conf" --query 'Parameter.Value' --output text --region ${aws_region})
 # A list of the vhosts that the web server loads e.g. cakeit.nz
 vhost_list=$(grep -i '^Include ' ${vhost_httpd_conf} | sed "s|[iI]nclude \"${vhost_root}/||g; s|/conf/httpd.conf\"||g;")
 # A list of the vhost folders stored, irrespective of if they are loaded by the web server or not

@@ -2,7 +2,7 @@
 #
 # Author:       Mike Clements, Competitive Edge
 # Version:      0.7.53-20210306
-# File:         ec2_builder-web_server.sh
+# File:         web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
 # Source:       https://github.com/mike548141/ec2_builder
@@ -113,7 +113,7 @@ check_pid_lock () {
   done
 }
 
-# Beautifies the feedback to the user/log file on std_out
+# Beautifies the feedback to std_out
 feedback () {
   case ${1} in
   title)
@@ -137,7 +137,6 @@ feedback () {
     echo '================================================================================'
     echo "--> ${2}"
     echo '--------------------------------------------------------------------------------'
-    echo ''
     ;;
   h3)
     echo '--------------------------------------------------------------------------------'
@@ -184,7 +183,7 @@ pkgmgr () {
   check_pid_lock ${packmgr}
   case ${1} in
   update)
-    feedback h2 'Get updates from package repositories'
+    feedback h3 'Get updates from package repositories'
     case ${packmgr} in
     apt)
       apt update
@@ -197,7 +196,7 @@ pkgmgr () {
     esac
     ;;
   upgrade)
-    feedback h2 'Upgrade installed packages'
+    feedback h3 'Upgrade installed packages'
     case ${packmgr} in
     apt)
       apt --assume-yes upgrade
@@ -210,7 +209,7 @@ pkgmgr () {
     esac
     ;;
   install)
-    feedback h2 "Install ${2}"
+    feedback h3 "Install ${2}"
     case ${packmgr} in
     apt)
       apt --assume-yes install ${2}
@@ -269,7 +268,7 @@ manage_ale () {
 #--------------------------------------
 if [ "${1}" == "go" ]
 then
-  feedback title "ec2_builder build script"
+  feedback title 'ec2_builder build script'
   script_ver=$(grep '^# Version:[ \t]*' ${0} | sed 's|# Version:[ \t]*||')
   hostos_pretty=$(grep '^PRETTY_NAME=' /etc/os-release | sed 's|"||g; s|^PRETTY_NAME=||;')
   feedback body "Script: ${0}"
@@ -302,32 +301,23 @@ else
   feedback error 'Package manager not found'
 fi
 
-# AWS CLI
-if [ ! -f '/usr/bin/aws' ]
-then
-  # Assume AWS CLI is not installed and we have the apt package manager. AL2 includes AWS CLI by default but Ubuntu does not
-  feedback h1 'Installing the awscli package'
-  pkgmgr update
-  pkgmgr install 'awscli'
-fi
-
 feedback h3 'Get the EC2 instance ID and AWS region'
-# The initial AWS region setting using the instances placement so that we can connect to the AWS SSM parameter store
+# AWS region and EC2 instance ID so we can use awscli
 if [ -f '/usr/bin/ec2metadata' ]
 then
-  instance_id=$(ec2metadata --instance-id)
   aws_region=$(ec2metadata --availability-zone | cut -c 1-9)
+  instance_id=$(ec2metadata --instance-id)
 elif [ -f '/usr/bin/ec2-metadata' ]
 then
-  instance_id=$(ec2-metadata --instance-id | cut -c 14-)
   aws_region=$(ec2-metadata --availability-zone | cut -c 12-20)
+  instance_id=$(ec2-metadata --instance-id | cut -c 14-)
 else
   feedback error "Can't find ec2metadata or ec2-metadata"
 fi
 if [ -z "${aws_region}" ]
 then
-  feedback error "AWS region not set, assuming us-east-1"
   aws_region='us-east-1'
+  feedback error "AWS region not set, assuming ${aws_region}"
 fi
 feedback body "Instance ${instance_id} is in the ${aws_region} region"
 
@@ -346,10 +336,7 @@ build_app=$(aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && R
 feedback body 'Get the service group'
 service_group=$(aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == 'service_group'].Value" --output text --region ${aws_region})
 # Define the parameter store structure
-app_parameters="/${tenancy}/${resource_environment}/${service_group}/${build_app}"
-
-# Connect to AWS SSM Parameter Store to see what region we should be using
-aws_region=$(aws ssm get-parameter --name "${app_parameters}/awscli/aws_region" --query 'Parameter.Value' --output text --region ${aws_region})
+app_parameters="/${tenancy}/${resource_environment}/${service_group}"
 
 #======================================
 # Declare the variables
@@ -632,8 +619,8 @@ yum)
 esac
 feedback h3 'Mount the EFS volume for vhost data'
 # The AWS EFS volume and mount point used to hold virtual host config, content and logs that is shared between web hosts (aka instances)
-efs_volume=$(aws ssm get-parameter --name "${app_parameters}/efs_volume" --query 'Parameter.Value' --output text --region ${aws_region})
-efs_mount_point=$(aws ssm get-parameter --name "${app_parameters}/efs_mount_point" --query 'Parameter.Value' --output text --region ${aws_region})
+efs_mount_point=$(aws ssm get-parameter --name "${app_parameters}/awsefs/mount_point" --query 'Parameter.Value' --output text --region ${aws_region})
+efs_volume=$(aws ssm get-parameter --name "${app_parameters}/awsefs/volume" --query 'Parameter.Value' --output text --region ${aws_region})
 mkdir --parents ${efs_mount_point}
 if mountpoint -q ${efs_mount_point}
 then
@@ -684,9 +671,8 @@ done
 
 # Default config for AWS CLI tools
 feedback h1 'Configure AWS CLI for the root user'
-aws_cli_output=$(aws ssm get-parameter --name "${app_parameters}/awscli/aws_cli_output" --query 'Parameter.Value' --output text --region ${aws_region})
 aws configure set region ${aws_region}
-aws configure set output ${aws_cli_output}
+aws configure set output $(aws ssm get-parameter --name "${common_parameters}/awscli/cli_output" --query 'Parameter.Value' --output text --region ${aws_region})
 
 # Install Fuse S3FS and mount the S3 bucket for web server data - https://github.com/s3fs-fuse/s3fs-fuse
 feedback h1 'Fuse S3FS'
@@ -702,17 +688,14 @@ feedback h3 'Configure FUSE'
 sed -i 's|^# user_allow_other$|user_allow_other|' /etc/fuse.conf
 feedback h3 'Configure AWS CLI credentials for the root user, S3FS uses the same file'
 # This AWS API key and secret is attached to the IAM user ec2.web.cakeit.nz
-aws_access_key_id=$(aws ssm get-parameter --name "${common_parameters}/awscli/aws_access_key_id" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption)
-aws_access_key_secret=$(aws ssm get-parameter --name "${common_parameters}/awscli/aws_access_key_secret" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption)
-aws configure set aws_access_key_id ${aws_access_key_id}
-aws configure set aws_secret_access_key ${aws_access_key_secret}
+aws configure set aws_access_key_id $(aws ssm get-parameter --name "${common_parameters}/awscli/access_key_id" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption)
+aws configure set aws_secret_access_key $(aws ssm get-parameter --name "${common_parameters}/awscli/access_key_secret" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption)
 # Clear the secret from memory
-unset aws_access_key_id
-unset aws_access_key_secret
 feedback h3 'Mount the S3 bucket for static web data'
 # The AWS S3 bucket used to hold web content that is shared between web hosts, not currently used but is cheaper than EFS
-s3_bucket=$(aws ssm get-parameter --name "${app_parameters}/s3_bucket" --query 'Parameter.Value' --output text --region ${aws_region})
-s3_mount_point=$(aws ssm get-parameter --name "${app_parameters}/s3_mount_point" --query 'Parameter.Value' --output text --region ${aws_region})
+s3_bucket=$(aws ssm get-parameter --name "${app_parameters}/s3fs/bucket" --query 'Parameter.Value' --output text --region ${aws_region})
+#### s3_mount_point is defined here and in common_variables
+s3_mount_point=$(aws ssm get-parameter --name "${app_parameters}/s3fs/mount_point" --query 'Parameter.Value' --output text --region ${aws_region})
 mkdir --parents ${s3_mount_point}
 if mountpoint -q ${s3_mount_point}
 then
@@ -881,7 +864,7 @@ esac
 # Create and install this instances certificates, these will be kept locally on EBS.  All vhost certificates need to be kept on EFS.
 feedback h2 'Get Lets Encrypt certificates for this server'
 # The contact email address for Lets Encrypt if a certificate problem comes up
-pki_email=$(aws ssm get-parameter --name "${app_parameters}/pki_email" --query 'Parameter.Value' --output text --region ${aws_region})
+pki_email=$(aws ssm get-parameter --name "${app_parameters}/pki/email" --query 'Parameter.Value' --output text --region ${aws_region})
 mkdir --parents "/var/log/letsencrypt"
 certbot certonly --domains "${instance_id}.${hosting_domain},web2.${hosting_domain}" --apache --non-interactive --agree-tos --email "${pki_email}" --no-eff-email --logs-dir "/var/log/letsencrypt" --redirect --must-staple --staple-ocsp --hsts --uir
 
