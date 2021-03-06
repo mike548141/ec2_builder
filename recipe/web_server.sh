@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.53-20210306
+# Version:      0.7.54-20210306
 # File:         web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -229,6 +229,8 @@ pkgmgr () {
   if [ ${exit_code} -ne 0 ]
   then
     feedback error "${packmgr} exit code ${exit_code}"
+  else
+    feedback body "Thumbs up, ${packmgr} exit code ${exit_code}"
   fi
   # Wait for the package manager to terminate
   check_pid_lock ${packmgr}
@@ -328,10 +330,6 @@ resource_environment=$(aws ec2 describe-tags --query "Tags[?ResourceType == 'ins
 # Define the parameter store structure
 common_parameters="/${tenancy}/${resource_environment}/common"
 feedback body "Using AWS parameter store ${common_parameters} in the ${aws_region} region"
-
-# Build script name
-feedback body 'Get the name of the build app from the instance tags'
-build_app=$(aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == 'build_app'].Value" --output text --region ${aws_region})
 
 feedback body 'Get the service group'
 service_group=$(aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == 'service_group'].Value" --output text --region ${aws_region})
@@ -575,8 +573,6 @@ feedback h1 'General tools'
 pkgmgr install 'ethtool'
 # System monitoring
 pkgmgr install 'stacer sysstat iotop'
-# Install Git to install Amazon EFS helper, support content versioning in MediaWiki, and general use
-pkgmgr install 'git'
 # Install the MariaDB client for connecting to Aurora Serverless to manage the databases
 case ${hostos_id} in
 ubuntu)
@@ -594,13 +590,13 @@ apt)
   echo "deb https://ookla.bintray.com/debian generic main" | tee  /etc/apt/sources.list.d/speedtest.list
   ;;
 yum)
+  cd ~
   wget --tries=2 https://bintray.com/ookla/rhel/rpm -O bintray-ookla-rhel.repo
   mv bintray-ookla-rhel.repo /etc/yum.repos.d/
   ;;
 esac
 pkgmgr update
 pkgmgr install 'speedtest'
-### check this installs properly
 
 # Install AWS EFS helper and mount the EFS volume for vhost data
 feedback h1 'AWS EFS helper'
@@ -634,7 +630,7 @@ ${efs_volume}:/ ${efs_mount_point} efs tls,_netdev 0 0
 ***EOF***
 
 # Import the common constants and variables held in a script on the EFS volume. This saves duplicating code between scripts
-feedback h1 'Import the common constants and variables from EFS'
+feedback h1 'Import the common variables from EFS'
 source "${efs_mount_point}/script/common_variables.sh"
 
 # Create a directory for this instances log files on the EFS volume
@@ -692,10 +688,6 @@ aws configure set aws_access_key_id $(aws ssm get-parameter --name "${common_par
 aws configure set aws_secret_access_key $(aws ssm get-parameter --name "${common_parameters}/awscli/access_key_secret" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption)
 # Clear the secret from memory
 feedback h3 'Mount the S3 bucket for static web data'
-# The AWS S3 bucket used to hold web content that is shared between web hosts, not currently used but is cheaper than EFS
-s3_bucket=$(aws ssm get-parameter --name "${app_parameters}/s3fs/bucket" --query 'Parameter.Value' --output text --region ${aws_region})
-#### s3_mount_point is defined here and in common_variables
-s3_mount_point=$(aws ssm get-parameter --name "${app_parameters}/s3fs/mount_point" --query 'Parameter.Value' --output text --region ${aws_region})
 mkdir --parents ${s3_mount_point}
 if mountpoint -q ${s3_mount_point}
 then
@@ -715,13 +707,17 @@ pkgmgr install 'golang'
 pkgmgr install 'ruby'
 pkgmgr install 'nodejs npm'
 # PHP
-manage_ale enable 'php7.3'
-pkgmgr install 'php-cli php-fpm php-common php-pdo php-json php-mysqlnd php-bcmath php-gd php-intl php-mbstring php-xml php-pear'
 case ${hostos_id} in
+ubuntu)
+  php_daemon='php7.4-fpm.service'
+  ;;
 amzn)
+  manage_ale enable 'php7.3'
   pkgmgr install 'php-pecl-apcu php-pecl-imagick php-pecl-libsodium php-pecl-zip'
+  php_daemon='php-fpm.service'
   ;;
 esac
+pkgmgr install 'php-cli php-fpm php-common php-pdo php-json php-mysqlnd php-bcmath php-gd php-intl php-mbstring php-xml php-pear'
 # Create a PHP config for the _default_ vhost
 feedback h3 'Create a PHP-FPM config on EBS for this instances _default_ vhost'
 cp "${vhost_root}/_default_/conf/instance-specific-php-fpm.conf" /etc/php-fpm.d/this-instance.conf
@@ -733,9 +729,8 @@ cat <<***EOF*** > '/etc/php-fpm.d/vhost.conf'
 include=${efs_mount_point}/conf/vhosts-php-fpm.conf
 ***EOF***
 feedback h3 'Restart PHP-FPM to recognise the additional PHP modules and config'
-systemctl restart php-fpm.service
-systemctl -l status php-fpm.service
-#####Failed to restart php-fpm.service: Unit php-fpm.service not found.
+systemctl restart ${php_daemon}
+systemctl -l status ${php_daemon}
 
 # Install MariaDB server to host databases as Aurora Serverless resume is too slow (~25s from cold to warm)
 # This section will only be used for standalone installs. Eventually this will either use a dedicated EC2 running MariaDB or AWS RDS Aurora
@@ -776,7 +771,7 @@ yum)
   pkgmgr install 'https://dl-ssl.google.com/dl/linux/direct/mod-pagespeed-stable_current_x86_64.rpm'
   ;;
 esac
-#### /etc/httpd vs /etc/apache2
+##### /etc/httpd vs /etc/apache2
 # Replace the Apache HTTPD MPM module prefork with the module event for HTTP/2 compatibility and to improve server performance
 feedback h3 'Change MPM modules from prefork to event'
 cp '/etc/httpd/conf.modules.d/00-mpm.conf' '/etc/httpd/conf.modules.d/00-mpm.conf.bak'
@@ -907,7 +902,7 @@ esac
 # Install Ookla Speedtest server
 feedback h1 'Ookla speedtest server'
 mkdir --parents '/opt/ookla/server'
-cd /opt/ookla/server/
+cd '/opt/ookla/server/'
 wget --tries=2 http://install.speedtest.net/ooklaserver/stable/OoklaServer.tgz
 tar -xzvf OoklaServer.tgz OoklaServer-linux64.tar
 rm --force OoklaServer.tgz
@@ -947,5 +942,4 @@ systemctl daemon-reload
 
 # Thats all I wrote
 feedback title "Build script finished - https://${instance_id}.${hosting_domain}/wiki/"
-
-### reboot
+### add a reboot
