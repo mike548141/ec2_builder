@@ -183,7 +183,7 @@ pkgmgr () {
   check_pid_lock ${packmgr}
   case ${1} in
   update)
-    feedback h2 'Package manager update'
+    feedback h2 'Get updates from package repositories'
     case ${packmgr} in
     apt)
       apt update
@@ -309,8 +309,6 @@ then
   pkgmgr install 'awscli'
 fi
 
-feedback h1 'Setting up'
-
 feedback h3 'Get the EC2 instance ID and AWS region'
 # The initial AWS region setting using the instances placement so that we can connect to the AWS SSM parameter store
 if [ -f '/usr/bin/ec2metadata' ]
@@ -324,19 +322,12 @@ then
 else
   feedback error "Can't find ec2metadata or ec2-metadata"
 fi
-if [ "${aws_region}" == '' ]
+if [ -z "${aws_region}" ]
 then
   feedback error "AWS region not set, assuming us-east-1"
   aws_region='us-east-1'
 fi
 feedback body "Instance ${instance_id} is in the ${aws_region} region"
-
-# Configuration parameters are held in AWS Systems Manager Parameter Store, retrieving these using the AWC CLI. Permissions are granted to do this using a IAM role assigned to the instance
-# Delete the AWS credentials file so that the AWS CLI uses the instances profile/role permissions
-if [ -f '/root/.aws/credentials' ]
-then
-  rm --force '/root/.aws/credentials'
-fi
 
 # What does the world around the instance look like
 feedback body 'Get the tenancy and environment from the instance tags'
@@ -384,7 +375,7 @@ systemctl daemon-reload
 case ${packmgr} in
 apt)
   # Debian (Ubuntu) tools to automate package installations that are interactive
-  feedback h1 'Install debconf tools'
+  feedback h1 'Install package management extensions'
   pkgmgr install 'debconf-utils'
   ;;
 esac
@@ -759,6 +750,7 @@ include=${efs_mount_point}/conf/vhosts-php-fpm.conf
 feedback h3 'Restart PHP-FPM to recognise the additional PHP modules and config'
 systemctl restart php-fpm.service
 systemctl -l status php-fpm.service
+#####Failed to restart php-fpm.service: Unit php-fpm.service not found.
 
 # Install MariaDB server to host databases as Aurora Serverless resume is too slow (~25s from cold to warm)
 # This section will only be used for standalone installs. Eventually this will either use a dedicated EC2 running MariaDB or AWS RDS Aurora
@@ -774,18 +766,18 @@ feedback h1 'Install the web server'
 case ${hostos_id} in
 ubuntu)
   pkgmgr install 'apache2 apache2-doc apache2-suexec-pristine'
-  httpd_daemon='apache2.service'
+  http_daemon='apache2.service'
   ;;
 amzn)
   manage_ale enable 'httpd_modules'
   pkgmgr install 'httpd mod_ssl'
-  httpd_daemon='httpd.service'
+  http_daemon='httpd.service'
   ;;
 esac
 feedback body 'Set it to auto start at boot'
-systemctl enable ${httpd_daemon}
+systemctl enable ${http_daemon}
 feedback h3 'Start the web server'
-systemctl restart ${httpd_daemon}
+systemctl restart ${http_daemon}
 feedback h2 'PageSpeed'
 case ${packmgr} in
 apt)
@@ -829,9 +821,9 @@ then
   touch '/etc/letsencrypt/options-ssl-apache.conf'
 fi
 feedback h3 'Restart the web server'
-systemctl restart ${httpd_daemon}
+systemctl restart ${http_daemon}
 feedback h3 'Web server status'
-systemctl -l status ${httpd_daemon}
+systemctl -l status ${http_daemon}
 
 feedback h1 'Web hosting software'
 # Install Ghost Script, a PostScript interpreter and renderer that is used by WordPress for PDFs
@@ -901,7 +893,7 @@ then
           s|#SSLCertificateFile[ \t]*/etc/letsencrypt/live/|SSLCertificateFile\t\t/etc/letsencrypt/live/|; \
           s|#SSLCertificateKeyFile[ \t]*/etc/letsencrypt/live/|SSLCertificateKeyFile\t\t/etc/letsencrypt/live/|;" '/etc/httpd/conf.d/this-instance.conf'
   feedback h3 'Restart the web server'
-  systemctl restart ${httpd_daemon}
+  systemctl restart ${http_daemon}
 fi
 # Link each of the vhosts listed in vhosts-httpd.conf to letsencrypt on this instance. So that all instances can renew all certificates as required
 feedback h3 'Include the vhosts Lets Encrypt config on this server'
