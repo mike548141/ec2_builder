@@ -488,8 +488,7 @@ esac
 
 # Install the management agents
 feedback h1 'System management agents'
-# The AWS SSM agent is installed by default on both AL2 and Ubuntu (as a snap package) AMI's
-# The following packages are not required yet
+# The AWS SSM agent is installed by default on both AL2 and Ubuntu (as a snap package) AMI's. The following packages are not required yet
 #manage_ale enable 'ansible2'
 #pkgmgr install 'ansible'
 #manage_ale enable 'rust1'
@@ -669,6 +668,9 @@ done
 feedback h1 'Configure AWS CLI for the root user'
 aws configure set region ${aws_region}
 aws configure set output $(aws ssm get-parameter --name "${common_parameters}/awscli/cli_output" --query 'Parameter.Value' --output text --region ${aws_region})
+# This AWS API key and secret is attached to the IAM user ec2.web.cakeit.nz
+aws configure set aws_access_key_id $(aws ssm get-parameter --name "${common_parameters}/awscli/access_key_id" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption)
+aws configure set aws_secret_access_key $(aws ssm get-parameter --name "${common_parameters}/awscli/access_key_secret" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption)
 
 # Install Fuse S3FS and mount the S3 bucket for web server data - https://github.com/s3fs-fuse/s3fs-fuse
 feedback h1 'Fuse S3FS'
@@ -681,12 +683,7 @@ amzn)
   ;;
 esac
 feedback h3 'Configure FUSE'
-sed -i 's|^# user_allow_other$|user_allow_other|' /etc/fuse.conf
-feedback h3 'Configure AWS CLI credentials for the root user, S3FS uses the same file'
-# This AWS API key and secret is attached to the IAM user ec2.web.cakeit.nz
-aws configure set aws_access_key_id $(aws ssm get-parameter --name "${common_parameters}/awscli/access_key_id" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption)
-aws configure set aws_secret_access_key $(aws ssm get-parameter --name "${common_parameters}/awscli/access_key_secret" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption)
-# Clear the secret from memory
+sed -i 's|^# user_allow_other$|user_allow_other|' '/etc/fuse.conf'
 feedback h3 'Mount the S3 bucket for static web data'
 mkdir --parents ${s3_mount_point}
 if mountpoint -q ${s3_mount_point}
