@@ -197,5 +197,5 @@ fi
 
 recipe=$(aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == 'recipe'].Value" --output text --region ${aws_region})
 feedback h1 "Launch the ${recipe} recipe"
-chmod 0740 "~/ec2_builder/recipe/*.sh"
-"~/ec2_builder/recipe/${recipe}.sh" go
+chmod 0740 ~/ec2_builder/recipe/*.sh
+~/ec2_builder/recipe/${recipe}.sh go
