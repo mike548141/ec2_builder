@@ -1,6 +1,17 @@
 # ec2_builder
 Scripts to build EC2 instances
 
+# Definitions
+## Playbook
+Describes a series of manual steps to achieve an outcome, for example the steps to access AWS and build a web server using a recipe.
+## Recipe
+A script that configures a host for its role e.g. web server.
+## Module
+Modules are code snippets that are re-usable across multiple recipes. Examples are a chunk of code that hardens the OpenSSH daemon, or code to format sreen or log output from a script.
+
+# IAM
+Review and reduce permissions for EC2 IAM profile
+
 # SES
 Setup AWS SES for email from the web server.. Could also use this for things like the printer, the NAS etc...
 Server Name:    email-smtp.us-east-1.amazonaws.com
