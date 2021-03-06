@@ -178,7 +178,7 @@ get_public_ip () {
   fi
 }
 
-# Install an app using yum
+# Install an application package
 pkgmgr () {
   # Check that the package manager is not already running
   check_pid_lock ${packmgr}
@@ -291,6 +291,7 @@ fi
 # Get to know the OS so we can support AL2 and Ubuntu
 hostos_id=$(grep '^ID=' /etc/os-release | sed 's|"||g; s|^ID=||;')
 hostos_ver=$(grep '^VERSION_ID=' /etc/os-release | sed 's|"||g; s|^VERSION_ID=||;')
+# Which package manger do we have to work with
 if [ -f '/usr/bin/apt' ]
 then
   packmgr='apt'

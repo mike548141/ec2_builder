@@ -7,8 +7,7 @@
 # Language:     bash
 # Source:       https://github.com/mike548141/ec2_builder
 #
-# Description:
-#  This script is a bridge between an AWS EC2 Launch Template and the script that configures the instance for its role, developed on an Amazon Linux 2 AMI and extended to support ubuntu 20.04 LTS AMI; using a t3a.nano instance.
+# Description: This script is a bridge between an AWS EC2 Launch Template and the ec2_builder recipe that configures the instance for its role.
 #
 # References:
 #
@@ -26,7 +25,7 @@
 #======================================
 # Declare the libraries and functions
 #--------------------------------------
-# Beautifies the feedback to the user/log file on std_out
+# Beautifies the feedback to std_out
 feedback () {
   case ${1} in
   title)
@@ -76,15 +75,65 @@ feedback () {
   esac
 }
 
+# Install an application package
+pkgmgr () {
+  case ${1} in
+  update)
+    feedback h3 'Get updates from package repositories'
+    case ${packmgr} in
+    apt)
+      apt update
+      local exit_code=${?}
+      ;;
+    yum)
+      yum --assumeyes update
+      local exit_code=${?}
+      ;;
+    esac
+    ;;
+  upgrade)
+    feedback h3 'Upgrade installed packages'
+    case ${packmgr} in
+    apt)
+      apt --assume-yes upgrade
+      local exit_code=${?}
+      ;;
+    yum)
+      yum --assumeyes upgrade
+      local exit_code=${?}
+      ;;
+    esac
+    ;;
+  install)
+    feedback h3 "Install ${2}"
+    case ${packmgr} in
+    apt)
+      apt --assume-yes install ${2}
+      local exit_code=${?}
+      ;;
+    yum)
+      yum --assumeyes install ${2}
+      local exit_code=${?}
+      ;;
+    esac
+    ;;
+  *)
+    feedback error "The package manager function can not understand the command ${1}"
+    ;;
+  esac
+  if [ ${exit_code} -ne 0 ]
+  then
+    feedback error "${packmgr} exit code ${exit_code}"
+  fi
+}
+
 #======================================
 # Say hello
 #--------------------------------------
-feedback title "ec2_builder launch script"
-script_ver=$(grep '^# Version:[ \t]*' ${0} | sed 's|# Version:[ \t]*||')
-hostos_pretty=$(grep '^PRETTY_NAME=' /etc/os-release | sed 's|"||g; s|^PRETTY_NAME=||;')
+feedback title 'ec2_builder launch script'
 feedback body "Script: ${0}"
-feedback body "Script version: ${script_ver}"
-feedback body "OS: ${hostos_pretty}"
+feedback body "Script version: $(grep '^#[ \t]*Version:[ \t]*' ${0} | sed 's|#[ \t]*Version:[ \t]*||')"
+feedback body "OS: $(grep '^PRETTY_NAME=' /etc/os-release | sed 's|"||g; s|^PRETTY_NAME=||;')"
 feedback body "User: $(whoami)"
 feedback body "Shell: $(readlink /proc/$$/exe)"
 feedback body "Started: $(date)"
@@ -92,57 +141,33 @@ feedback body "Started: $(date)"
 #======================================
 # Declare the constants
 #--------------------------------------
-# AWS CLI
-if [ ! -f '/usr/bin/aws' ] && [ -f '/usr/bin/apt' ]
+# Which package manger do we have to work with
+if [ -f '/usr/bin/apt' ]
 then
-  # Assume AWS CLI is not installed and we have the apt package manager. AL2 includes AWS CLI by default but Ubuntu does not
-  feedback h1 'Installing the awscli package'
-  apt update
-  apt --assume-yes install awscli
+  packmgr='apt'
+elif [ -f '/usr/bin/yum' ]
+then
+  packmgr='yum'
+else
+  feedback error 'Package manager not found'
 fi
 
-feedback h3 'Get the EC2 instance ID and AWS region'
-# The initial AWS region setting using the instances placement so that we can connect to the AWS SSM parameter store
+# AWS region and EC2 instance ID so we can use awscli
 if [ -f '/usr/bin/ec2metadata' ]
 then
-  instance_id=$(ec2metadata --instance-id)
   aws_region=$(ec2metadata --availability-zone | cut -c 1-9)
+  instance_id=$(ec2metadata --instance-id)
 elif [ -f '/usr/bin/ec2-metadata' ]
 then
-  instance_id=$(ec2-metadata --instance-id | cut -c 14-)
   aws_region=$(ec2-metadata --availability-zone | cut -c 12-20)
+  instance_id=$(ec2-metadata --instance-id | cut -c 14-)
 else
   feedback error "Can't find ec2metadata or ec2-metadata"
 fi
 if [ -z "${aws_region}" ]
 then
-  feedback error "AWS region not set, assuming us-east-1"
   aws_region='us-east-1'
-fi
-feedback body "Instance ${instance_id} is in the ${aws_region} region"
-
-# What does the world around the instance look like
-feedback body 'Get the tenancy and environment from the instance tags'
-tenancy=$(aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == 'tenancy'].Value" --output text --region ${aws_region})
-resource_environment=$(aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == 'resource_environment'].Value" --output text --region ${aws_region})
-# Define the parameter store structure
-common_parameters="/${tenancy}/${resource_environment}/common"
-feedback body "Using AWS parameter store ${common_parameters} in the ${aws_region} region"
-
-# Build script name
-feedback body 'Get the name of the build app from the instance tags'
-build_app=$(aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == 'build_app'].Value" --output text --region ${aws_region})
-
-# GitHub API secret
-if [ -f '/usr/bin/aws' ]
-then
-  github_api_secret=$(aws ssm get-parameter --name "${common_parameters}/github/api_secret" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption)
-else
-  feedback error 'The awscli package is missing'
-fi
-if [ "${github_api_secret}" == "" ]
-then
-  feedback error 'Failed to retrieve the GitHub API secret'
+  feedback error "AWS region not set, assuming ${aws_region}"
 fi
 
 #======================================
@@ -152,20 +177,25 @@ fi
 #======================================
 # Lets get into it
 #--------------------------------------
-feedback h1 'Download the build script'
-cd /root
-curl -H "Authorization: token ${github_api_secret}" \
-     -H 'Accept: application/vnd.github.v4.raw' \
-     -O \
-     -f \
-     -L \
-     "https://raw.githubusercontent.com/mike548141/ec2_builder/master/${build_app}"
+feedback body "Instance ${instance_id} is in the ${aws_region} region"
+
+feedback h1 'Add pre-reqs'
+pkgmgr update
+pkgmgr install 'awscli'
+pkgmgr install 'git'
+
+feedback h1 'Retrieve ec2_builder'
+ec2_builder_repo=$(aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == 'ec2_builder_repo'].Value" --output text --region ${aws_region})
+cd ~
+git clone ${ec2_builder_repo}
 exit_code=${?}
 if [ ${exit_code} -ne 0 ]
 then
-  feedback error "Error downloading the build script (${build_app}), curl error ${exit_code}"
-else
-  chmod 0740 "/root/${build_app}"
-  feedback h2 'Execute the build script'
-  "/root/${build_app}" go
+  feedback error "Git error ${exit_code} pulling ${ec2_builder_repo}"
+  exit 1
 fi
+
+recipe=$(aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == 'recipe'].Value" --output text --region ${aws_region})
+feedback h1 "Launch the ${recipe} recipe"
+chmod 0740 "~/ec2_builder/recipe/*.sh"
+"~/ec2_builder/recipe/${recipe}.sh" go
