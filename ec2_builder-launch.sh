@@ -101,8 +101,6 @@ then
   apt --assume-yes install awscli
 fi
 
-feedback h1 'Setting up'
-
 feedback h3 'Get the EC2 instance ID and AWS region'
 # The initial AWS region setting using the instances placement so that we can connect to the AWS SSM parameter store
 if [ -f '/usr/bin/ec2metadata' ]

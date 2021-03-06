@@ -1,24 +1,12 @@
 # ec2_builder
 Scripts to build EC2 instances
 
-# ACM
-Swap from Let's Encrypt to AWS ACM for public certs. Removes the external dependency
-Keep the Lets Encrypt code for future use
-
 # SES
-Setup AWS SES for email from the web server.
-Could also use this for things like the printer, the NAS etc...
-
-Server Name:    
-email-smtp.us-east-1.amazonaws.com
+Setup AWS SES for email from the web server.. Could also use this for things like the printer, the NAS etc...
+Server Name:    email-smtp.us-east-1.amazonaws.com
 Port:    25, 465 or 587
 Use Transport Layer Security (TLS):    Yes
-Authentication:    Your SMTP credentials. See below for more information.
-ses-smtp-user.20210215-013032
-SMTP Username:
-AKIA54JEHKOIT77VIJEZ
-SMTP Password:
-BOxvx0SXBldW0Ff4JQ3I5aR55uOaDQl1M2FkldQYyTwX
+Authentication:    Your SMTP credentials. Keepass URI: {REF:T@I:629FB137-197C-4C33-9F1B-6E0FCF6339A8}
 
 # fpm-php service
 13/2/2021
@@ -31,14 +19,6 @@ I ran the following to get it working again but this might be something
 
 # Other
 * pki script on efs to update (launched from build script) to update the list of vhosts on each instance
-
 * Sync cake it.nz and default http conf
-
 * CSP header for default
-
-
-* Other tests and recommendations from https://observatory.mozilla.org/analyze/web2.cakeit.nz
-incl SSH tests
-
-i.e. general hardening.
-
+* Other tests and recommendations from https://observatory.mozilla.org/analyze/web2.cakeit.nz incl SSH tests i.e. general hardening.

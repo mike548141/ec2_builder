@@ -67,6 +67,7 @@
 #     - Have HTTPD & PHP reload the config after changing a vhost e.g. systemctl restart httpd php-fpm
 #     - add/delete users, groups, and group members as required. Ideally users & groups would be on a directory service
 #   * Ideally this would use IAM users to support MFA and a user ID that could tie to other services e.g. a S3 bucket dedicated to a IAM user
+#   * Swap from Let's Encrypt to AWS ACM for public certs. Removes the external dependency. Keep the Lets Encrypt code for future use
 #
 
 #======================================
