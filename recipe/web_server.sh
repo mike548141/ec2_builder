@@ -664,11 +664,11 @@ do
   fi
 done
 
-# Default config for AWS CLI tools
+# Root's config for AWS CLI tools held in ~/.aws, after this is set awscli uses the rights assigned to arn:aws:iam::954095588241:user/ec2.web2.cakeit.nz instead of the instance profile arn:aws:iam::954095588241:instance-profile/ec2-web.cakeit.nz and role arn:aws:iam::954095588241:role/ec2-web.cakeit.nz
 feedback h1 'Configure AWS CLI for the root user'
 aws configure set region ${aws_region}
 aws configure set output $(aws ssm get-parameter --name "${common_parameters}/awscli/cli_output" --query 'Parameter.Value' --output text --region ${aws_region})
-# This AWS API key and secret is attached to the IAM user ec2.web.cakeit.nz
+# Using variables because awscli will stop working when I set half of the credentials. So I need to retrieve both the variables before setting either of them
 aws_access_key_id=$(aws ssm get-parameter --name "${common_parameters}/awscli/access_key_id" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption)
 aws_secret_access_key=$(aws ssm get-parameter --name "${common_parameters}/awscli/access_key_secret" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption)
 aws configure set aws_access_key_id ${aws_access_key_id}
