@@ -220,7 +220,7 @@ pkgmgr () {
       local exit_code=${?}
       ;;
     esac
-    #### Check each package in the array was installed
+    ### Check each package in the array was installed
     ;;
   *)
     feedback error "The package manager function can not understand the command ${1}"
@@ -744,6 +744,16 @@ systemctl restart mariadb.service
 
 # Install the web server
 feedback h1 'Install the web server'
+
+
+##### Need to take the same steps for apache2 on ubuntu as I did for it on AL2
+# Replace vhosts-httpd.conf with symbolic links?
+# /etc/httpd/httpd.conf --> /etc/httpd/conf.d/vhost.conf --> /mnt/efs/conf/vhosts-httpd.conf --> /mnt/efs/vhost/example.com/conf/httpd.conf
+# /etc/httpd/httpd.conf --> /etc/httpd/conf.d/vhost.conf --> symbolic links to each of --> /mnt/efs/vhost/example.com/conf/httpd.conf
+
+
+
+
 case ${hostos_id} in
 ubuntu)
   pkgmgr install 'apache2 apache2-doc apache2-suexec-pristine'
@@ -753,13 +763,39 @@ amzn)
   manage_ale enable 'httpd_modules'
   pkgmgr install 'httpd mod_ssl'
   http_daemon='httpd.service'
+  # Replace the Apache HTTPD MPM module prefork with the module event for HTTP/2 compatibility and to improve server performance
+  feedback h3 'Change MPM modules from prefork to event'
+  cp '/etc/httpd/conf.modules.d/00-mpm.conf' '/etc/httpd/conf.modules.d/00-mpm.conf.bak'
+  sed -i 's|^LoadModule mpm_prefork_module modules/mod_mpm_prefork\.so$|#LoadModule mpm_prefork_module modules/mod_mpm_prefork.so|' /etc/httpd/conf.modules.d/00-mpm.conf
+  sed -i 's|^#LoadModule mpm_event_module modules/mod_mpm_event\.so$|LoadModule mpm_event_module modules/mod_mpm_event.so|' /etc/httpd/conf.modules.d/00-mpm.conf
+  # Disable the _default_ SSL config as it will be in the server specific config
+  feedback h3 'Disable the default SSL config'
+  mv '/etc/httpd/conf.d/ssl.conf' '/etc/httpd/conf.d/ssl.conf.disable'
+  # Disable the welcome page config
+  feedback h3 'Disable the welcome page config'
+  mv '/etc/httpd/conf.d/welcome.conf' '/etc/httpd/conf.d/welcome.conf.disable'
+  # Create a config for the server on the EBS volume
+  feedback h3 'Create a _default_ virtual host config on this instance'
+  cp "${vhost_root}/_default_/conf/instance-specific-httpd.conf" /etc/httpd/conf.d/this-instance.conf
+  sed -i "s|i-instanceid\.cakeit\.nz|${instance_id}.${hosting_domain}|g" /etc/httpd/conf.d/this-instance.conf
+  # Include the vhost config on the EFS volume
+  feedback h3 'Include the vhost config from the EFS volume'
+  cat <<***EOF*** > '/etc/httpd/conf.d/vhost.conf'
+  # Publish the vhosts stored on the EFS volume
+  Include ${vhost_httpd_conf}
+  ***EOF***
   ;;
 esac
-feedback body 'Set it to auto start at boot'
+feedback body 'Set the web server to auto start at boot'
 systemctl enable ${http_daemon}
-feedback h3 'Start the web server'
-systemctl restart ${http_daemon}
-feedback h2 'PageSpeed'
+# The vhosts httpd config points to this conf file, it won't exist yet since LetsEncrypt has not run yet. This creates an empty file so that httpd can load.
+if [ ! -f '/etc/letsencrypt/options-ssl-apache.conf' ]
+then
+  feedback h3 'Create an empty options-ssl-apache.conf because the vhosts depend upon it'
+  mkdir '/etc/letsencrypt'
+  touch '/etc/letsencrypt/options-ssl-apache.conf'
+fi
+feedback h2 'Extra web hosting software'
 case ${packmgr} in
 apt)
   cd ~
@@ -772,43 +808,12 @@ yum)
   pkgmgr install 'https://dl-ssl.google.com/dl/linux/direct/mod-pagespeed-stable_current_x86_64.rpm'
   ;;
 esac
-##### /etc/httpd vs /etc/apache2
-# Replace the Apache HTTPD MPM module prefork with the module event for HTTP/2 compatibility and to improve server performance
-feedback h3 'Change MPM modules from prefork to event'
-cp '/etc/httpd/conf.modules.d/00-mpm.conf' '/etc/httpd/conf.modules.d/00-mpm.conf.bak'
-sed -i 's|^LoadModule mpm_prefork_module modules/mod_mpm_prefork\.so$|#LoadModule mpm_prefork_module modules/mod_mpm_prefork.so|' /etc/httpd/conf.modules.d/00-mpm.conf
-sed -i 's|^#LoadModule mpm_event_module modules/mod_mpm_event\.so$|LoadModule mpm_event_module modules/mod_mpm_event.so|' /etc/httpd/conf.modules.d/00-mpm.conf
-# Disable the _default_ SSL config as it will be in the server specific config
-feedback h3 'Disable the default SSL config'
-mv '/etc/httpd/conf.d/ssl.conf' '/etc/httpd/conf.d/ssl.conf.disable'
-# Disable the welcome page config
-feedback h3 'Disable the welcome page config'
-mv '/etc/httpd/conf.d/welcome.conf' '/etc/httpd/conf.d/welcome.conf.disable'
-# Create a config for the server on the EBS volume
-feedback h3 'Create a _default_ virtual host config on this instance'
-cp "${vhost_root}/_default_/conf/instance-specific-httpd.conf" /etc/httpd/conf.d/this-instance.conf
-sed -i "s|i-instanceid\.cakeit\.nz|${instance_id}.${hosting_domain}|g" /etc/httpd/conf.d/this-instance.conf
-# Include the vhost config on the EFS volume
-feedback h3 'Include the vhost config from the EFS volume'
-cat <<***EOF*** > '/etc/httpd/conf.d/vhost.conf'
-# Publish the vhosts stored on the EFS volume
-Include ${vhost_httpd_conf}
-***EOF***
-# The vhosts httpd config points to this conf file, it won't exist yet since LetsEncrypt has not run yet. This creates an empty file so that httpd can load.
-if [ ! -f '/etc/letsencrypt/options-ssl-apache.conf' ]
-then
-  feedback h3 'Create an empty options-ssl-apache.conf because the vhosts depend upon it'
-  mkdir '/etc/letsencrypt'
-  touch '/etc/letsencrypt/options-ssl-apache.conf'
-fi
-feedback h3 'Restart the web server'
+# Install Ghost Script, a PostScript interpreter and renderer that is used by WordPress for PDFs
+pkgmgr install 'ghostscript'
+feedback h3 'Start the web server'
 systemctl restart ${http_daemon}
 feedback h3 'Web server status'
 systemctl -l status ${http_daemon}
-
-feedback h1 'Web hosting software'
-# Install Ghost Script, a PostScript interpreter and renderer that is used by WordPress for PDFs
-pkgmgr install 'ghostscript'
 
 # Get the AWS Elastic IP address used to web host
 eip_allocation_id=$(aws ssm get-parameter --name "${app_parameters}/eip_allocation_id" --query 'Parameter.Value' --output text --region ${aws_region})
