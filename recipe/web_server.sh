@@ -628,7 +628,7 @@ feedback h1 'Import the common variables from EFS'
 source "${efs_mount_point}/script/common_variables.sh"
 
 # Create a directory for this instances log files on the EFS volume
-### Probably remove this section above, should not be used anymore but need to check that
+### Probably remove this section, should not be used anymore but need to check that
 feedback h1 'Create a space for this instances log files on the EFS volume'
 mkdir --parents "${vhost_root}/_default_/log/${instance_id}.${hosting_domain}"
 
@@ -705,32 +705,47 @@ pkgmgr install 'nodejs npm'
 # PHP
 case ${hostos_id} in
 ubuntu)
-  php_daemon='php7.4-fpm.service'
+  pkgmgr install 'php-cli php-fpm php-common php-pdo php-json php-mysqlnd php-bcmath php-gd php-intl php-mbstring php-xml php-pear'
+  php_service='php7.4-fpm.service'
+  # Create a PHP config for the _default_ vhost
+  feedback h3 'Create a PHP-FPM config on EBS for this instances _default_ vhost'
+  cp "${vhost_root}/_default_/conf/instance-specific-php-fpm.conf" /etc/php/7.4/mods-available/this-instance.conf
+  sed -i "s|i-.*\.cakeit\.nz|${instance_id}.${hosting_domain}|g" /etc/php/7.4/mods-available/this-instance.conf
+  # Include the vhost config on the EFS volume
+  feedback h3 'Include the vhost config on the EFS volume'
+  cat <<***EOF*** > '/etc/php/7.4/mods-available/vhost.conf'
+  ; Include the vhosts stored on the EFS volume
+  include=${efs_mount_point}/conf/*.php-fpm.conf
+  ***EOF***
   ;;
 amzn)
   manage_ale enable 'php7.3'
-  pkgmgr install 'php-pecl-apcu php-pecl-imagick php-pecl-libsodium php-pecl-zip'
-  php_daemon='php-fpm.service'
+  pkgmgr install 'php-cli php-fpm php-common php-pdo php-json php-mysqlnd php-bcmath php-gd php-intl php-mbstring php-xml php-pear php-pecl-apcu php-pecl-imagick php-pecl-libsodium php-pecl-zip'
+  php_service='php-fpm.service'
+  # Create a PHP config for the _default_ vhost
+  feedback h3 'Create a PHP-FPM config on EBS for this instances _default_ vhost'
+  cp "${vhost_root}/_default_/conf/instance-specific-php-fpm.conf" /etc/php-fpm.d/this-instance.conf
+  sed -i "s|i-.*\.cakeit\.nz|${instance_id}.${hosting_domain}|g" /etc/php-fpm.d/this-instance.conf
+  # Include the vhost config on the EFS volume
+  feedback h3 'Include the vhost config on the EFS volume'
+  cat <<***EOF*** > '/etc/php-fpm.d/vhost.conf'
+  ; Include the vhosts stored on the EFS volume
+  include=${efs_mount_point}/conf/*.php-fpm.conf
+  ***EOF***
   ;;
 esac
-pkgmgr install 'php-cli php-fpm php-common php-pdo php-json php-mysqlnd php-bcmath php-gd php-intl php-mbstring php-xml php-pear'
-# Create a PHP config for the _default_ vhost
-feedback h3 'Create a PHP-FPM config on EBS for this instances _default_ vhost'
-cp "${vhost_root}/_default_/conf/instance-specific-php-fpm.conf" /etc/php-fpm.d/this-instance.conf
-sed -i "s|i-.*\.cakeit\.nz|${instance_id}.${hosting_domain}|g" /etc/php-fpm.d/this-instance.conf
-# Include the vhost config on the EFS volume
-feedback h3 'Include the vhost config on the EFS volume'
-cat <<***EOF*** > '/etc/php-fpm.d/vhost.conf'
-; Include the vhosts stored on the EFS volume
-include=${efs_mount_point}/conf/vhosts-php-fpm.conf
-***EOF***
 feedback h3 'Restart PHP-FPM to recognise the additional PHP modules and config'
-systemctl restart ${php_daemon}
-systemctl -l status ${php_daemon}
-#### cp: cannot create regular file '/etc/php-fpm.d/this-instance.conf': No such file or directory
+systemctl restart ${php_service}
+systemctl -l status ${php_service}
 
-# Install MariaDB server to host databases as Aurora Serverless resume is too slow (~25s from cold to warm)
-# This section will only be used for standalone installs. Eventually this will either use a dedicated EC2 running MariaDB or AWS RDS Aurora
+
+#Change to using the symlinks instead of the file for the vhosts
+#link in default and vhost to the enabled folder
+#### cp: cannot create regular file '/etc/php-fpm.d/this-instance.conf': No such file or directory
+# /etc/php/7.4/mods-available
+# /etc/php/7.4/fpm/conf.d
+
+# Install MariaDB server to host databases as Aurora Serverless resume is too slow (~25s from cold to warm). This section will only be used for standalone installs. Eventually this will either use a dedicated EC2 running MariaDB or AWS RDS Aurora
 feedback h1 'MariaDB (MySQL) server'
 pkgmgr install 'mariadb-server'
 feedback body 'Set it to auto start at boot'
@@ -743,31 +758,27 @@ feedback h1 'Install the web server'
 case ${hostos_id} in
 ubuntu)
   pkgmgr install 'apache2 apache2-doc apache2-suexec-pristine'
-  http_daemon='apache2.service'
-  # Disable the apache docs
-  mv /etc/apache2/conf-enabled/apache2-doc.conf /etc/apache2/conf-enabled/apache2-doc.conf.disable
-  # Enable some apache2 modules
+  httpd_service='apache2.service'
+  a2disconf apache2-doc
   a2enmod http2
   a2enmod ssl
   # Setup the httpd conf for the default vhost specific to this vhosts name
   feedback h3 'Create a _default_ virtual host config on this instance'
   cp "${vhost_root}/_default_/conf/instance-specific-httpd.conf" /etc/apache2/sites-available/this-instance.conf
   sed -i "s|i-instanceid\.cakeit\.nz|${instance_id}.${hosting_domain}|g" /etc/apache2/sites-available/this-instance.conf
-  cd '/etc/apache2/sites-enabled'
-  ln -s ../sites-available/this-instance.conf
+  a2ensite this-instance
   # Include all the vhosts that are enabled on the EFS volume mounted
   feedback h3 'Include the vhost config on the EFS volume'
   cat <<***EOF*** > '/etc/apache2/sites-available/vhost.conf'
   # Serve the vhosts stored on the EFS volume
   Include ${efs_mount_point}/conf/*.httpd.conf
   ***EOF***
-  cd '/etc/apache2/sites-enabled'
-  ln -s ../sites-available/vhost.conf
+  a2ensite vhost
   ;;
 amzn)
   manage_ale enable 'httpd_modules'
   pkgmgr install 'httpd mod_ssl'
-  http_daemon='httpd.service'
+  httpd_service='httpd.service'
   # Replace the Apache HTTPD MPM module prefork with the module event for HTTP/2 compatibility and to improve server performance
   feedback h3 'Change MPM modules from prefork to event'
   cp '/etc/httpd/conf.modules.d/00-mpm.conf' '/etc/httpd/conf.modules.d/00-mpm.conf.bak'
@@ -791,7 +802,7 @@ amzn)
   ;;
 esac
 feedback body 'Set the web server to auto start at boot'
-systemctl enable ${http_daemon}
+systemctl enable ${httpd_service}
 # The vhosts httpd config points to this conf file, it won't exist yet since LetsEncrypt has not run yet. This creates an empty file so that httpd can load.
 if [ ! -f '/etc/letsencrypt/options-ssl-apache.conf' ]
 then
@@ -815,9 +826,9 @@ esac
 # Install Ghost Script, a PostScript interpreter and renderer that is used by WordPress for PDFs
 pkgmgr install 'ghostscript'
 feedback h3 'Start the web server'
-systemctl restart ${http_daemon}
+systemctl restart ${httpd_service}
 feedback h3 'Web server status'
-systemctl -l status ${http_daemon}
+systemctl -l status ${httpd_service}
 
 # Get the AWS Elastic IP address used to web host
 eip_allocation_id=$(aws ssm get-parameter --name "${app_parameters}/eip_allocation_id" --query 'Parameter.Value' --output text --region ${aws_region})
@@ -883,7 +894,7 @@ then
           s|#SSLCertificateFile[ \t]*/etc/letsencrypt/live/|SSLCertificateFile\t\t/etc/letsencrypt/live/|; \
           s|#SSLCertificateKeyFile[ \t]*/etc/letsencrypt/live/|SSLCertificateKeyFile\t\t/etc/letsencrypt/live/|;" '/etc/httpd/conf.d/this-instance.conf'
   feedback h3 'Restart the web server'
-  systemctl restart ${http_daemon}
+  systemctl restart ${httpd_service}
 fi
 # Link each of the vhosts listed in vhosts-httpd.conf to letsencrypt on this instance. So that all instances can renew all certificates as required
 feedback h3 'Include the vhosts Lets Encrypt config on this server'
