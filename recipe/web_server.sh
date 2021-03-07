@@ -714,11 +714,8 @@ ubuntu)
   phpenmod this-instance
   # Include the vhost config on the EFS volume
   feedback h3 'Include the vhost config on the EFS volume'
-  ####EOF
-cat <<***EOF*** > '/etc/php/7.4/mods-available/vhost.conf'
-; Include the vhosts stored on the EFS volume
-include=${efs_mount_point}/conf/*.php-fpm.conf
-***EOF***
+  echo '; Include the vhosts stored on the EFS volume' > '/etc/php/7.4/mods-available/vhost.conf'
+  echo "include=${efs_mount_point}/conf/*.php-fpm.conf" >> '/etc/php/7.4/mods-available/vhost.conf'
   phpenmod vhost
   ;;
 amzn)
@@ -731,16 +728,14 @@ amzn)
   sed -i "s|i-.*\.cakeit\.nz|${instance_id}.${hosting_domain}|g" /etc/php-fpm.d/this-instance.conf
   # Include the vhost config on the EFS volume
   feedback h3 'Include the vhost config on the EFS volume'
-  ####EOF
-cat <<***EOF*** > '/etc/php-fpm.d/vhost.conf'
-; Include the vhosts stored on the EFS volume
-include=${efs_mount_point}/conf/*.php-fpm.conf
-***EOF***
+  echo '; Include the vhosts stored on the EFS volume' > '/etc/php-fpm.d/vhost.conf'
+  echo "include=${efs_mount_point}/conf/*.php-fpm.conf" >> '/etc/php-fpm.d/vhost.conf'
   ;;
 esac
 feedback h3 'Restart PHP-FPM to recognise the additional PHP modules and config'
 systemctl restart ${php_service}
 systemctl -l status ${php_service}
+##### WARNING: Module this-instance ini file doesn't exist under /etc/php/7.4/mods-available
 
 # Install MariaDB server to host databases as Aurora Serverless resume is too slow (~25s from cold to warm). This section will only be used for standalone installs. Eventually this will either use a dedicated EC2 running MariaDB or AWS RDS Aurora
 feedback h1 'MariaDB (MySQL) server'
@@ -757,8 +752,18 @@ ubuntu)
   pkgmgr install 'apache2 apache2-doc apache2-suexec-pristine'
   httpd_service='apache2.service'
   a2disconf apache2-doc
+  a2enmod headers
   a2enmod http2
+  a2enmod rewrite
   a2enmod ssl
+  
+  ######
+  # listen port - fixed, commented out
+  # rewrite - fixed, module enabled
+  #SSLPassPhraseDialog
+  # headers - fixed, module enabled
+  #Cannot access directory '/var/log/httpd/
+  
   # Setup the httpd conf for the default vhost specific to this vhosts name
   feedback h3 'Create a _default_ virtual host config on this instance'
   cp "${vhost_root}/_default_/conf/instance-specific-httpd.conf" /etc/apache2/sites-available/this-instance.conf
@@ -766,11 +771,8 @@ ubuntu)
   a2ensite this-instance
   # Include all the vhosts that are enabled on the EFS volume mounted
   feedback h3 'Include the vhost config on the EFS volume'
-  ####EOF
-cat <<***EOF*** > '/etc/apache2/sites-available/vhost.conf'
-# Serve the vhosts stored on the EFS volume
-Include ${efs_mount_point}/conf/*.httpd.conf
-***EOF***
+  echo '# Serve the vhosts stored on the EFS volume' > '/etc/apache2/sites-available/vhost.conf'
+  echo "Include ${efs_mount_point}/conf/*.httpd.conf" >> '/etc/apache2/sites-available/vhost.conf'
   a2ensite vhost
   ;;
 amzn)
@@ -793,11 +795,8 @@ amzn)
   cp "${vhost_root}/_default_/conf/instance-specific-httpd.conf" /etc/httpd/conf.d/this-instance.conf
   sed -i "s|i-instanceid\.cakeit\.nz|${instance_id}.${hosting_domain}|g" /etc/httpd/conf.d/this-instance.conf
   feedback h3 'Include the vhost config on the EFS volume'
-  ####EOF
-cat <<***EOF*** > '/etc/httpd/conf.d/vhost.conf'
-# Serve the vhosts stored on the EFS volume
-Include ${efs_mount_point}/conf/*.httpd.conf
-***EOF***
+  echo '# Serve the vhosts stored on the EFS volume' > '/etc/httpd/conf.d/vhost.conf'
+  echo "Include ${efs_mount_point}/conf/*.httpd.conf" >> '/etc/httpd/conf.d/vhost.conf'
   ;;
 esac
 feedback body 'Set the web server to auto start at boot'
