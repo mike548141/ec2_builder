@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.2.0-20210306
+# Version:      0.2.1-20210307
 # File:         common_variables.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -141,10 +141,10 @@ resource_environment=$(aws ec2 describe-tags --query "Tags[?ResourceType == 'ins
 service_group=$(aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == 'service_group'].Value" --output text --region ${aws_region})
 # Define the parameter store structure
 common_parameters="/${tenancy}/${resource_environment}/common"
-feedback body "Instance ${instance_id} is using AWS parameter store ${common_parameters} in the ${aws_region} region"
-
 # Define the parameter store structure
 app_parameters="/${tenancy}/${resource_environment}/${service_group}"
+feedback body "Instance ${instance_id} is using AWS parameter store ${app_parameters} in the ${aws_region} region"
+
 # The domain name used by the servers for web hosting, this domain name represents the hosting provider and not its customers vhosts
 hosting_domain=$(aws ssm get-parameter --name "${app_parameters}/hosting_domain" --query 'Parameter.Value' --output text --region ${aws_region})
 # The AWS EFS mount point used to hold virtual host config, content and logs that is shared between web hosts (aka instances)
@@ -155,10 +155,8 @@ s3_bucket=$(aws ssm get-parameter --name "${app_parameters}/s3fs/bucket" --query
 s3_mount_point=$(aws ssm get-parameter --name "${app_parameters}/s3fs/mount_point" --query 'Parameter.Value' --output text --region ${aws_region})
 # The root directory that all the vhosts folders are within
 vhost_root=$(aws ssm get-parameter --name "${app_parameters}/vhost/root" --query 'Parameter.Value' --output text --region ${aws_region})
-# The web servers config file that includes each of the individual vhosts
-vhost_httpd_conf=$(aws ssm get-parameter --name "${app_parameters}/vhost/httpd_conf" --query 'Parameter.Value' --output text --region ${aws_region})
 # A list of the vhosts that the web server loads e.g. cakeit.nz
-vhost_list=$(grep -i '^Include ' ${vhost_httpd_conf} | sed "s|[iI]nclude \"${vhost_root}/||g; s|/conf/httpd.conf\"||g;")
+vhost_list=$(ls ${efs_mount_point}/conf/*.httpd.conf | sed "s|${efs_mount_point}\/conf\/||g; s|\.httpd\.conf||g;")
 # A list of the vhost folders stored, irrespective of if they are loaded by the web server or not
 vhost_dir_list=$(ls --directory ${vhost_root}/*/ | sed "s|^${vhost_root}/||;s|/$||;")
 

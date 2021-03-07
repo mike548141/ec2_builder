@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.56-20210307
+# Version:      0.7.58-20210307
 # File:         web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -303,7 +303,6 @@ else
   feedback error 'Package manager not found'
 fi
 
-feedback h3 'Get the EC2 instance ID and AWS region'
 # AWS region and EC2 instance ID so we can use awscli
 if [ -f '/usr/bin/ec2metadata' ]
 then
@@ -324,17 +323,13 @@ fi
 feedback body "Instance ${instance_id} is in the ${aws_region} region"
 
 # What does the world around the instance look like
-feedback body 'Get the tenancy and environment from the instance tags'
 tenancy=$(aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == 'tenancy'].Value" --output text --region ${aws_region})
 resource_environment=$(aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == 'resource_environment'].Value" --output text --region ${aws_region})
-# Define the parameter store structure
-common_parameters="/${tenancy}/${resource_environment}/common"
-feedback body "Using AWS parameter store ${common_parameters} in the ${aws_region} region"
-
-feedback body 'Get the service group'
 service_group=$(aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == 'service_group'].Value" --output text --region ${aws_region})
 # Define the parameter store structure
+common_parameters="/${tenancy}/${resource_environment}/common"
 app_parameters="/${tenancy}/${resource_environment}/${service_group}"
+feedback body "Using AWS parameter store ${app_parameters} in the ${aws_region} region"
 
 #======================================
 # Declare the variables
@@ -372,7 +367,7 @@ feedback h1 'Harden the OpenSSH daemon'
 if [ ! $(getent group ssh_keys) ]
 then
   feedback h3 'Create a group called ssh_keys'
-  groupadd ssh_keys
+  groupadd --gid 200 ssh_keys
 fi
 # New host keys incase they are compromised
 feedback h3 'Re-generate the RSA and ED25519 keys'
@@ -450,7 +445,7 @@ systemctl -l status sshd.service
 
 # Configure sudo on the host to allow members of the group sudo. This is default on Ubuntu
 feedback h1 'Configure sudo'
-if [ -z "$(getent group 'sudo')" ]
+if [ ! $(getent group sudo) ]
 then
   feedback body 'Create sudo group'
   groupadd --gid 27 'sudo'
@@ -732,6 +727,7 @@ include=${efs_mount_point}/conf/vhosts-php-fpm.conf
 feedback h3 'Restart PHP-FPM to recognise the additional PHP modules and config'
 systemctl restart ${php_daemon}
 systemctl -l status ${php_daemon}
+#### cp: cannot create regular file '/etc/php-fpm.d/this-instance.conf': No such file or directory
 
 # Install MariaDB server to host databases as Aurora Serverless resume is too slow (~25s from cold to warm)
 # This section will only be used for standalone installs. Eventually this will either use a dedicated EC2 running MariaDB or AWS RDS Aurora
@@ -744,21 +740,29 @@ systemctl restart mariadb.service
 
 # Install the web server
 feedback h1 'Install the web server'
-
-
-##### Need to take the same steps for apache2 on ubuntu as I did for it on AL2
-# Replace vhosts-httpd.conf with symbolic links?
-# /etc/httpd/httpd.conf --> /etc/httpd/conf.d/vhost.conf --> /mnt/efs/conf/vhosts-httpd.conf --> /mnt/efs/vhost/example.com/conf/httpd.conf
-# /etc/httpd/httpd.conf --> /etc/httpd/conf.d/vhost.conf --> symbolic links to each of --> /mnt/efs/vhost/example.com/conf/httpd.conf
-
-
-
-
 case ${hostos_id} in
 ubuntu)
   pkgmgr install 'apache2 apache2-doc apache2-suexec-pristine'
   http_daemon='apache2.service'
-  #####
+  # Disable the apache docs
+  mv /etc/apache2/conf-enabled/apache2-doc.conf /etc/apache2/conf-enabled/apache2-doc.conf.disable
+  # Enable some apache2 modules
+  a2enmod http2
+  a2enmod ssl
+  # Setup the httpd conf for the default vhost specific to this vhosts name
+  feedback h3 'Create a _default_ virtual host config on this instance'
+  cp "${vhost_root}/_default_/conf/instance-specific-httpd.conf" /etc/apache2/sites-available/this-instance.conf
+  sed -i "s|i-instanceid\.cakeit\.nz|${instance_id}.${hosting_domain}|g" /etc/apache2/sites-available/this-instance.conf
+  cd '/etc/apache2/sites-enabled'
+  ln -s ../sites-available/this-instance.conf
+  # Include all the vhosts that are enabled on the EFS volume mounted
+  feedback h3 'Include the vhost config on the EFS volume'
+  cat <<***EOF*** > '/etc/apache2/sites-available/vhost.conf'
+  # Serve the vhosts stored on the EFS volume
+  Include ${efs_mount_point}/conf/*.httpd.conf
+  ***EOF***
+  cd '/etc/apache2/sites-enabled'
+  ln -s ../sites-available/vhost.conf
   ;;
 amzn)
   manage_ale enable 'httpd_modules'
@@ -779,11 +783,10 @@ amzn)
   feedback h3 'Create a _default_ virtual host config on this instance'
   cp "${vhost_root}/_default_/conf/instance-specific-httpd.conf" /etc/httpd/conf.d/this-instance.conf
   sed -i "s|i-instanceid\.cakeit\.nz|${instance_id}.${hosting_domain}|g" /etc/httpd/conf.d/this-instance.conf
-  # Include the vhost config on the EFS volume
-  feedback h3 'Include the vhost config from the EFS volume'
+  feedback h3 'Include the vhost config on the EFS volume'
   cat <<***EOF*** > '/etc/httpd/conf.d/vhost.conf'
-  # Publish the vhosts stored on the EFS volume
-  Include ${vhost_httpd_conf}
+  # Serve the vhosts stored on the EFS volume
+  Include ${efs_mount_point}/conf/*.httpd.conf
   ***EOF***
   ;;
 esac
