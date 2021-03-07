@@ -709,14 +709,12 @@ ubuntu)
   php_service='php7.4-fpm.service'
   # Create a PHP config for the _default_ vhost
   feedback h3 'Create a PHP-FPM config on EBS for this instances _default_ vhost'
-  cp "${vhost_root}/_default_/conf/instance-specific-php-fpm.conf" /etc/php/7.4/mods-available/this-instance.conf
-  sed -i "s|i-.*\.cakeit\.nz|${instance_id}.${hosting_domain}|g" /etc/php/7.4/mods-available/this-instance.conf
-  phpenmod this-instance
+  cp "${vhost_root}/_default_/conf/instance-specific-php-fpm.conf" '/etc/php/7.4/fpm/pool.d/this-instance.conf'
+  sed -i "s|i-.*\.cakeit\.nz|${instance_id}.${hosting_domain}|g" '/etc/php/7.4/fpm/pool.d/this-instance.conf'
   # Include the vhost config on the EFS volume
   feedback h3 'Include the vhost config on the EFS volume'
-  echo '; Include the vhosts stored on the EFS volume' > '/etc/php/7.4/mods-available/vhost.conf'
-  echo "include=${efs_mount_point}/conf/*.php-fpm.conf" >> '/etc/php/7.4/mods-available/vhost.conf'
-  phpenmod vhost
+  echo '; Include the vhosts stored on the EFS volume' > '/etc/php/7.4/fpm/pool.d/vhost.conf'
+  echo "include=${efs_mount_point}/conf/*.php-fpm.conf" >> '/etc/php/7.4/fpm/pool.d/vhost.conf'
   ;;
 amzn)
   manage_ale enable 'php7.3'
@@ -735,7 +733,13 @@ esac
 feedback h3 'Restart PHP-FPM to recognise the additional PHP modules and config'
 systemctl restart ${php_service}
 systemctl -l status ${php_service}
-##### WARNING: Module this-instance ini file doesn't exist under /etc/php/7.4/mods-available
+
+#### Check cloud-init for warrning or error messages
+#update-rc.d: warning: start and stop actions are no longer supported; falling back to defaults
+#/usr/lib/python3/dist-packages/jmespath/visitor.py:32: SyntaxWarning: "is" with a literal. Did you mean "=="?
+#Warning: The home dir /var/run/stunnel4 you specified can't be accessed: No such file or directory
+#ERROR: cannot verify cakeit.nz's certificate, issued by ‘CN=Let's Encrypt Authority X3,O=Let's Encrypt,C=US’:
+
 
 # Install MariaDB server to host databases as Aurora Serverless resume is too slow (~25s from cold to warm). This section will only be used for standalone installs. Eventually this will either use a dedicated EC2 running MariaDB or AWS RDS Aurora
 feedback h1 'MariaDB (MySQL) server'
@@ -756,14 +760,6 @@ ubuntu)
   a2enmod http2
   a2enmod rewrite
   a2enmod ssl
-  
-  ######
-  # listen port - fixed, commented out
-  # rewrite - fixed, module enabled
-  #SSLPassPhraseDialog
-  # headers - fixed, module enabled
-  #Cannot access directory '/var/log/httpd/
-  
   # Setup the httpd conf for the default vhost specific to this vhosts name
   feedback h3 'Create a _default_ virtual host config on this instance'
   cp "${vhost_root}/_default_/conf/instance-specific-httpd.conf" /etc/apache2/sites-available/this-instance.conf
