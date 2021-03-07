@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.55-20210306
+# Version:      0.7.56-20210307
 # File:         web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -758,6 +758,7 @@ case ${hostos_id} in
 ubuntu)
   pkgmgr install 'apache2 apache2-doc apache2-suexec-pristine'
   http_daemon='apache2.service'
+  #####
   ;;
 amzn)
   manage_ale enable 'httpd_modules'
