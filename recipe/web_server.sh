@@ -714,10 +714,11 @@ ubuntu)
   phpenmod this-instance
   # Include the vhost config on the EFS volume
   feedback h3 'Include the vhost config on the EFS volume'
-  cat <<***EOF*** > '/etc/php/7.4/mods-available/vhost.conf'
-  ; Include the vhosts stored on the EFS volume
-  include=${efs_mount_point}/conf/*.php-fpm.conf
-  ***EOF***
+  ####EOF
+cat <<***EOF*** > '/etc/php/7.4/mods-available/vhost.conf'
+; Include the vhosts stored on the EFS volume
+include=${efs_mount_point}/conf/*.php-fpm.conf
+***EOF***
   phpenmod vhost
   ;;
 amzn)
@@ -730,10 +731,11 @@ amzn)
   sed -i "s|i-.*\.cakeit\.nz|${instance_id}.${hosting_domain}|g" /etc/php-fpm.d/this-instance.conf
   # Include the vhost config on the EFS volume
   feedback h3 'Include the vhost config on the EFS volume'
-  cat <<***EOF*** > '/etc/php-fpm.d/vhost.conf'
-  ; Include the vhosts stored on the EFS volume
-  include=${efs_mount_point}/conf/*.php-fpm.conf
-  ***EOF***
+  ####EOF
+cat <<***EOF*** > '/etc/php-fpm.d/vhost.conf'
+; Include the vhosts stored on the EFS volume
+include=${efs_mount_point}/conf/*.php-fpm.conf
+***EOF***
   ;;
 esac
 feedback h3 'Restart PHP-FPM to recognise the additional PHP modules and config'
@@ -764,10 +766,11 @@ ubuntu)
   a2ensite this-instance
   # Include all the vhosts that are enabled on the EFS volume mounted
   feedback h3 'Include the vhost config on the EFS volume'
-  cat <<***EOF*** > '/etc/apache2/sites-available/vhost.conf'
-  # Serve the vhosts stored on the EFS volume
-  Include ${efs_mount_point}/conf/*.httpd.conf
-  ***EOF***
+  ####EOF
+cat <<***EOF*** > '/etc/apache2/sites-available/vhost.conf'
+# Serve the vhosts stored on the EFS volume
+Include ${efs_mount_point}/conf/*.httpd.conf
+***EOF***
   a2ensite vhost
   ;;
 amzn)
@@ -790,10 +793,11 @@ amzn)
   cp "${vhost_root}/_default_/conf/instance-specific-httpd.conf" /etc/httpd/conf.d/this-instance.conf
   sed -i "s|i-instanceid\.cakeit\.nz|${instance_id}.${hosting_domain}|g" /etc/httpd/conf.d/this-instance.conf
   feedback h3 'Include the vhost config on the EFS volume'
-  cat <<***EOF*** > '/etc/httpd/conf.d/vhost.conf'
-  # Serve the vhosts stored on the EFS volume
-  Include ${efs_mount_point}/conf/*.httpd.conf
-  ***EOF***
+  ####EOF
+cat <<***EOF*** > '/etc/httpd/conf.d/vhost.conf'
+# Serve the vhosts stored on the EFS volume
+Include ${efs_mount_point}/conf/*.httpd.conf
+***EOF***
   ;;
 esac
 feedback body 'Set the web server to auto start at boot'
