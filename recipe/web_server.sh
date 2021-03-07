@@ -711,12 +711,14 @@ ubuntu)
   feedback h3 'Create a PHP-FPM config on EBS for this instances _default_ vhost'
   cp "${vhost_root}/_default_/conf/instance-specific-php-fpm.conf" /etc/php/7.4/mods-available/this-instance.conf
   sed -i "s|i-.*\.cakeit\.nz|${instance_id}.${hosting_domain}|g" /etc/php/7.4/mods-available/this-instance.conf
+  phpenmod this-instance
   # Include the vhost config on the EFS volume
   feedback h3 'Include the vhost config on the EFS volume'
   cat <<***EOF*** > '/etc/php/7.4/mods-available/vhost.conf'
   ; Include the vhosts stored on the EFS volume
   include=${efs_mount_point}/conf/*.php-fpm.conf
   ***EOF***
+  phpenmod vhost
   ;;
 amzn)
   manage_ale enable 'php7.3'
@@ -737,13 +739,6 @@ esac
 feedback h3 'Restart PHP-FPM to recognise the additional PHP modules and config'
 systemctl restart ${php_service}
 systemctl -l status ${php_service}
-
-
-#Change to using the symlinks instead of the file for the vhosts
-#link in default and vhost to the enabled folder
-#### cp: cannot create regular file '/etc/php-fpm.d/this-instance.conf': No such file or directory
-# /etc/php/7.4/mods-available
-# /etc/php/7.4/fpm/conf.d
 
 # Install MariaDB server to host databases as Aurora Serverless resume is too slow (~25s from cold to warm). This section will only be used for standalone installs. Eventually this will either use a dedicated EC2 running MariaDB or AWS RDS Aurora
 feedback h1 'MariaDB (MySQL) server'
