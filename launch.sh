@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.3.0-20210306
+# Version:      0.3.1-20210307
 # File:         launch.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -196,5 +196,5 @@ fi
 
 recipe=$(aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == 'recipe'].Value" --output text --region ${aws_region})
 feedback h1 "Launch the ${recipe} recipe"
-chmod 0740 ~/ec2_builder/recipe/*.sh
+chmod 0740 ~/ec2_builder/recipe/${recipe}.sh
 ~/ec2_builder/recipe/${recipe}.sh go
