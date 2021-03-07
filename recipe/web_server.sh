@@ -959,3 +959,4 @@ systemctl daemon-reload
 # Thats all I wrote
 feedback title "Build script finished - https://${instance_id}.${hosting_domain}/wiki/"
 ### add a reboot
+exit 0
