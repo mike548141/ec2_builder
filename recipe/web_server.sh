@@ -272,7 +272,7 @@ if [ "${1}" == "go" ]
 then
   feedback title 'ec2_builder build script'
   script_ver=$(grep '^# Version:[ \t]*' ${0} | sed 's|# Version:[ \t]*||')
-  hostos_pretty=$(grep '^PRETTY_NAME=' /etc/os-release | sed 's|"||g; s|^PRETTY_NAME=||;')
+  hostos_pretty=$(grep '^PRETTY_NAME=' '/etc/os-release' | sed 's|"||g; s|^PRETTY_NAME=||;')
   feedback body "Script: ${0}"
   feedback body "Script version: ${script_ver}"
   feedback body "OS: ${hostos_pretty}"
@@ -290,8 +290,8 @@ fi
 # Declare the constants
 #--------------------------------------
 # Get to know the OS so we can support AL2 and Ubuntu
-hostos_id=$(grep '^ID=' /etc/os-release | sed 's|"||g; s|^ID=||;')
-hostos_ver=$(grep '^VERSION_ID=' /etc/os-release | sed 's|"||g; s|^VERSION_ID=||;')
+hostos_id=$(grep '^ID=' '/etc/os-release' | sed 's|"||g; s|^ID=||;')
+hostos_ver=$(grep '^VERSION_ID=' '/etc/os-release' | sed 's|"||g; s|^VERSION_ID=||;')
 # Which package manger do we have to work with
 if [ -f '/usr/bin/apt' ]
 then
@@ -362,26 +362,23 @@ apt)
   ;;
 esac
 
-##### https://www.sshaudit.com/
-# Remove ssh-rsa host key
+##### Need to re-test against sshaudit and rebex
+#### Also test TLS HTTP2 HSTS etc
 # diffie-hellman-group-exchange-sha256 (2048-bit) - A 3072-bit modulus is needed to provide 128 bits of security, but a 2048-bit modulus is in use. Score reduced by 1.
-
+# Instead of the awk
+#ssh-keygen -M generate -O bits=3072 moduli-3072.candidates
+#ssh-keygen -M screen -f moduli-3072.candidates moduli-3072
 
 # Configure the OpenSSH server
 feedback h1 'Harden the OpenSSH daemon'
-if [ ! $(getent group ssh_keys) ]
-then
-  feedback h3 'Create a group called ssh_keys'
-  groupadd --gid 200 ssh_keys
-fi
 # New host keys incase they are compromised
 feedback h3 'Re-generate the RSA and ED25519 keys'
 rm --force /etc/ssh/ssh_host_*
 ssh-keygen -t rsa -b 4096 -f '/etc/ssh/ssh_host_rsa_key' -N ""
-chown root:ssh_keys '/etc/ssh/ssh_host_rsa_key'
+chown root:root '/etc/ssh/ssh_host_rsa_key'
 chmod 0600 '/etc/ssh/ssh_host_rsa_key'
 ssh-keygen -t ed25519 -f '/etc/ssh/ssh_host_ed25519_key' -N ""
-chown root:ssh_keys '/etc/ssh/ssh_host_ed25519_key'
+chown root:root '/etc/ssh/ssh_host_ed25519_key'
 chmod 0600 '/etc/ssh/ssh_host_ed25519_key'
 # Harden the server: small Diffie-Hellman are weak
 feedback h3 'Remove small Diffie-Hellman moduli'
@@ -389,12 +386,11 @@ cp '/etc/ssh/moduli' '/etc/ssh/moduli.bak'
 awk '$5 >= 3071' '/etc/ssh/moduli' > '/etc/ssh/moduli.safe'
 mv -f '/etc/ssh/moduli.safe' '/etc/ssh/moduli'
 # Harden the server: DSA and ECDSA host keys can't be trusted
-feedback h3 'Disable the DSA and ECDSA host keys'
+feedback h3 'Disable any host keys in the main SSHD config'
 cp '/etc/ssh/sshd_config' '/etc/ssh/sshd_config.bak'
-sed -i 's|^HostKey /etc/ssh/ssh_host_dsa_key$|#HostKey /etc/ssh/ssh_host_dsa_key|g' '/etc/ssh/sshd_config'
-sed -i 's|^HostKey /etc/ssh/ssh_host_ecdsa_key$|#HostKey /etc/ssh/ssh_host_ecdsa_key|g' '/etc/ssh/sshd_config'
+sed -i 's|^HostKey[ \t]|#HostKey |g' '/etc/ssh/sshd_config'
 # Child configs for SSHD
-mkdir --parents /etc/ssh/sshd_config.d/
+mkdir --parents '/etc/ssh/sshd_config.d/'
 if [ -z "$(grep -i 'Include \/etc\/ssh\/sshd_config\.d\/\*\.conf' '/etc/ssh/sshd_config')" ]
 then
   ## Ubuntu has this by default, AL2's version of openssh-server (7.4p1-21.amzn2.0.1) does not support it
@@ -402,39 +398,54 @@ then
   echo '#Include /etc/ssh/sshd_config.d/*.conf' >> '/etc/ssh/sshd_config'
 fi
 # Use the cipher tech that we trust, tested against https://www.sshaudit.com/
-feedback h3 'Restrict the key exchanges, ciphers, and MAC algorithms supported'
-cat <<***EOF*** > '/etc/ssh/sshd_config.d/kecm.conf'
-# Restrict key exchange, cipher, and MAC algorithms
+feedback h3 'Adding the child SSHD configs to harden the server'
+cat <<***EOF*** > '/etc/ssh/sshd_config.d/host_key.conf'
+# SSHD host keys
+HostKey /etc/ssh/ssh_host_ed25519_key
+HostKey /etc/ssh/ssh_host_rsa_key
+
+# Allowed host key exchange algorithms
+HostKeyAlgorithms ssh-ed25519,rsa-sha2-512,rsa-sha2-256
+#HostKeyAlgorithms ssh-ed25519,ssh-ed25519-cert-v01@openssh.com,sk-ssh-ed25519@openssh.com,sk-ssh-ed25519-cert-v01@openssh.com,rsa-sha2-256,rsa-sha2-512,rsa-sha2-256-cert-v01@openssh.com,rsa-sha2-512-cert-v01@openssh.com
+***EOF***
+cat <<***EOF*** > '/etc/ssh/sshd_config.d/key_exchange.conf'
+# Allowed key exchange algorithms
 KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group18-sha512,diffie-hellman-group16-sha512,diffie-hellman-group-exchange-sha256
+***EOF***
+cat <<***EOF*** > '/etc/ssh/sshd_config.d/cipher.conf'
+# Allowed encryption algorithms (aka ciphers)
 Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr
+***EOF***
+cat <<***EOF*** > '/etc/ssh/sshd_config.d/mac.conf'
+# Allowed Message Authentication Code (MAC) algorithms
 MACs hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com,umac-128-etm@openssh.com
 ***EOF***
-# Harden the server: General config
-feedback h3 'Restrict client connection config'
-cat <<***EOF*** > '/etc/ssh/sshd_config.d/harden.conf'
+cat <<***EOF*** > '/etc/ssh/sshd_config.d/protocol.conf'
+# Allowed SSH protocols
 Protocol 2
-
+***EOF***
+cat <<***EOF*** > '/etc/ssh/sshd_config.d/authentication.conf'
+# Authentication related config
 PubkeyAuthentication yes
 AuthenticationMethods publickey
-
-ClientAliveInterval 300
-ClientAliveCountMax 24
-
 LoginGraceTime 1m
 PermitRootLogin no
 StrictModes yes
 MaxAuthTries 2
-MaxSessions 10
-
 PasswordAuthentication no
 PermitEmptyPasswords no
-
-PrintLastLog yes
-
-Banner /etc/ssh/sshd-banner
+Banner /etc/ssh/sshd_banner
+AllowGroups ssh
 ***EOF***
-# Banner
-cat <<***EOF*** > '/etc/ssh/sshd-banner'
+cat <<***EOF*** > '/etc/ssh/sshd_config.d/session.conf'
+# SSH session related config
+ClientAliveInterval 300
+ClientAliveCountMax 24
+MaxSessions 10
+PrintLastLog yes
+***EOF***
+# Create a welcome banner
+cat <<***EOF*** > '/etc/ssh/sshd_banner'
 
 ************************************************************************************************************************************************
 *                                                                                                                                              *
@@ -444,6 +455,15 @@ cat <<***EOF*** > '/etc/ssh/sshd-banner'
 ************************************************************************************************************************************************
 
 ***EOF***
+feedback h3 'Granting the default user SSH access'
+case ${hostos_id} in
+ubuntu)
+  usermod -aG 'ssh' 'ubuntu'
+  ;;
+amzn)
+  usermod -aG 'ssh' 'ec2-user'
+  ;;
+esac
 feedback h3 'Restart OpenSSH server'
 systemctl restart sshd.service
 systemctl -l status sshd.service
@@ -466,7 +486,8 @@ fi
 ## This should really link back to a central user repo and users get created dynamically
 feedback h1 'Create the user mike and a home directory'
 useradd --create-home -c 'Mike Clements' 'mike'
-feedback h3 'Add to sudoers'
+feedback h3 'Add to ssh and sudo groups for access'
+usermod -aG 'ssh' 'mike'
 usermod -aG 'sudo' 'mike'
 feedback h3 'Add SSH key'
 mkdir --parents '/home/mike/.ssh'
@@ -546,8 +567,8 @@ apt)
   add-apt-repository 'deb [arch=amd64] https://pkg.osquery.io/deb deb main'
   ;;
 yum)
-  curl -L https://pkg.osquery.io/rpm/GPG | tee /etc/pki/rpm-gpg/RPM-GPG-KEY-osquery
-  rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-osquery
+  curl -L https://pkg.osquery.io/rpm/GPG | tee '/etc/pki/rpm-gpg/RPM-GPG-KEY-osquery'
+  rpm --import '/etc/pki/rpm-gpg/RPM-GPG-KEY-osquery'
   yum-config-manager --add-repo https://pkg.osquery.io/rpm/osquery-s3-rpm.repo
   yum-config-manager --enable osquery-s3-rpm
   ;;
@@ -586,12 +607,12 @@ feedback h2 'Ookla client repo'
 case ${packmgr} in
 apt)
   apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 379CE192D401AB61
-  echo "deb https://ookla.bintray.com/debian generic main" | tee  /etc/apt/sources.list.d/speedtest.list
+  echo "deb https://ookla.bintray.com/debian generic main" | tee '/etc/apt/sources.list.d/speedtest.list'
   ;;
 yum)
   cd ~
   wget --tries=2 https://bintray.com/ookla/rhel/rpm -O bintray-ookla-rhel.repo
-  mv bintray-ookla-rhel.repo /etc/yum.repos.d/
+  mv ~/bintray-ookla-rhel.repo '/etc/yum.repos.d/bintray-ookla-rhel.repo'
   ;;
 esac
 pkgmgr update
@@ -660,7 +681,7 @@ do
     vhost_dir_gid=$(stat -c '%g' "${vhost_root}/${vhost_dir}")
     feedback body "Creating owner ${vhost_dir} with UID/GID ${vhost_dir_uid}/${vhost_dir_gid} for ${vhost_root}/${vhost_dir}"
     groupadd --gid ${vhost_dir_gid} "${vhost_dir}"
-    useradd --uid ${vhost_dir_uid} --gid ${vhost_dir_gid} --shell /sbin/nologin --home-dir "${vhost_root}/${vhost_dir}" --no-create-home --groups vhost_owners,vhost_all "${vhost_dir}"
+    useradd --uid ${vhost_dir_uid} --gid ${vhost_dir_gid} --shell '/sbin/nologin' --home-dir "${vhost_root}/${vhost_dir}" --no-create-home --groups vhost_owners,vhost_all "${vhost_dir}"
   fi
 done
 
@@ -687,6 +708,7 @@ amzn)
   ;;
 esac
 feedback h3 'Configure FUSE'
+cp '/etc/fuse.conf' '/etc/fuse.conf.bak'
 sed -i 's|^# user_allow_other$|user_allow_other|' '/etc/fuse.conf'
 feedback h3 'Mount the S3 bucket for static web data'
 mkdir --parents ${s3_mount_point}
@@ -768,8 +790,8 @@ ubuntu)
   a2enmod ssl
   # Setup the httpd conf for the default vhost specific to this vhosts name
   feedback h3 'Create a _default_ virtual host config on this instance'
-  cp "${vhost_root}/_default_/conf/instance-specific-httpd.conf" /etc/apache2/sites-available/this-instance.conf
-  sed -i "s|i-instanceid\.cakeit\.nz|${instance_id}.${hosting_domain}|g" /etc/apache2/sites-available/this-instance.conf
+  cp "${vhost_root}/_default_/conf/instance-specific-httpd.conf" '/etc/apache2/sites-available/this-instance.conf'
+  sed -i "s|i-instanceid\.cakeit\.nz|${instance_id}.${hosting_domain}|g" '/etc/apache2/sites-available/this-instance.conf'
   a2ensite this-instance
   # Include all the vhosts that are enabled on the EFS volume mounted
   feedback h3 'Include the vhost config on the EFS volume'
@@ -783,8 +805,8 @@ amzn)
   # Replace the Apache HTTPD MPM module prefork with the module event for HTTP/2 compatibility and to improve server performance
   feedback h3 'Change MPM modules from prefork to event'
   cp '/etc/httpd/conf.modules.d/00-mpm.conf' '/etc/httpd/conf.modules.d/00-mpm.conf.bak'
-  sed -i 's|^LoadModule mpm_prefork_module modules/mod_mpm_prefork\.so$|#LoadModule mpm_prefork_module modules/mod_mpm_prefork.so|' /etc/httpd/conf.modules.d/00-mpm.conf
-  sed -i 's|^#LoadModule mpm_event_module modules/mod_mpm_event\.so$|LoadModule mpm_event_module modules/mod_mpm_event.so|' /etc/httpd/conf.modules.d/00-mpm.conf
+  sed -i 's|^LoadModule mpm_prefork_module modules/mod_mpm_prefork\.so$|#LoadModule mpm_prefork_module modules/mod_mpm_prefork.so|' '/etc/httpd/conf.modules.d/00-mpm.conf'
+  sed -i 's|^#LoadModule mpm_event_module modules/mod_mpm_event\.so$|LoadModule mpm_event_module modules/mod_mpm_event.so|' '/etc/httpd/conf.modules.d/00-mpm.conf'
   # Disable the _default_ SSL config as it will be in the server specific config
   feedback h3 'Disable the default SSL config'
   mv '/etc/httpd/conf.d/ssl.conf' '/etc/httpd/conf.d/ssl.conf.disable'
@@ -793,8 +815,8 @@ amzn)
   mv '/etc/httpd/conf.d/welcome.conf' '/etc/httpd/conf.d/welcome.conf.disable'
   # Create a config for the server on the EBS volume
   feedback h3 'Create a _default_ virtual host config on this instance'
-  cp "${vhost_root}/_default_/conf/instance-specific-httpd.conf" /etc/httpd/conf.d/this-instance.conf
-  sed -i "s|i-instanceid\.cakeit\.nz|${instance_id}.${hosting_domain}|g" /etc/httpd/conf.d/this-instance.conf
+  cp "${vhost_root}/_default_/conf/instance-specific-httpd.conf" '/etc/httpd/conf.d/this-instance.conf'
+  sed -i "s|i-instanceid\.cakeit\.nz|${instance_id}.${hosting_domain}|g" '/etc/httpd/conf.d/this-instance.conf'
   feedback h3 'Include the vhost config on the EFS volume'
   ln -s "${efs_mount_point}/conf/httpd-vhost.conf" '/etc/httpd/conf.d/vhost.conf'
   ;;
@@ -908,7 +930,7 @@ ${efs_mount_point}/script/update_instance-vhosts_pki.sh
 # Run Lets Encrypt Certbot to revoke and/or renew certiicates
 certbot renew --no-self-upgrade
 ***EOF***
-chmod 0770 /etc/cron.daily/certbot
+chmod 0770 '/etc/cron.daily/certbot'
 case ${hostos_id} in
 ubuntu)
   systemctl restart cron.service
@@ -929,7 +951,8 @@ tar -xzvf OoklaServer-linux64.tar
 rm --force OoklaServer-linux64.tar
 chown root:root /opt/ookla/server/*
 # Customise the config
-sed -i 's|^logging\.loggers\.app\.|#logging.loggers.app.|g' /opt/ookla/server/OoklaServer.properties.default
+cp '/opt/ookla/server/OoklaServer.properties.default' '/opt/ookla/server/OoklaServer.properties.default.bak'
+sed -i 's|^logging\.loggers\.app\.|#logging.loggers.app.|g' '/opt/ookla/server/OoklaServer.properties.default'
 cat <<***EOF*** >> '/opt/ookla/server/OoklaServer.properties.default'
 
 # Server config
@@ -956,12 +979,12 @@ RestartSec=15min
 [Install]
 WantedBy=multi-user.target
 ***EOF***
-ln -s /opt/ookla/server/ookla-server.service /etc/systemd/system/ookla-server.service
+ln -s '/opt/ookla/server/ookla-server.service' '/etc/systemd/system/ookla-server.service'
 systemctl daemon-reload
 
 # Grab warnings and errors to review
-grep -i 'error' /var/log/cloud-init-output.log | sort | uniq > ~/for_review.log
-grep -i 'warn' /var/log/cloud-init-output.log | sort | uniq >> ~/for_review.log
+grep -i 'error' '/var/log/cloud-init-output.log' | sort | uniq >> ~/for_review.log
+grep -i 'warn' '/var/log/cloud-init-output.log' | sort | uniq >> ~/for_review.log
 
 # Thats all I wrote
 feedback title "Build script finished - https://${instance_id}.${hosting_domain}/wiki/"
