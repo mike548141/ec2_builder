@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.58-20210307
+# Version:      0.7.59-20210307
 # File:         web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -734,6 +734,11 @@ feedback h3 'Restart PHP-FPM to recognise the additional PHP modules and config'
 systemctl restart ${php_service}
 systemctl -l status ${php_service}
 
+#Mar 07 12:02:08 ip-172-31-77-82 php-fpm7.4[44633]: [07-Mar-2021 12:02:08] ERROR: [/etc/php/7.4/fpm/pool.d/this-instance.conf:7] unknown entry 'listen.acl_users'
+# cakeit.nz as well line 7
+#failed to open access log (/var/log/php/access.log): No such file or directory (2)
+#www-data
+
 #### Check cloud-init for warrning or error messages
 #update-rc.d: warning: start and stop actions are no longer supported; falling back to defaults
 #/usr/lib/python3/dist-packages/jmespath/visitor.py:32: SyntaxWarning: "is" with a literal. Did you mean "=="?
@@ -767,8 +772,7 @@ ubuntu)
   a2ensite this-instance
   # Include all the vhosts that are enabled on the EFS volume mounted
   feedback h3 'Include the vhost config on the EFS volume'
-  echo '# Serve the vhosts stored on the EFS volume' > '/etc/apache2/sites-available/vhost.conf'
-  echo "Include ${efs_mount_point}/conf/*.httpd.conf" >> '/etc/apache2/sites-available/vhost.conf'
+  ln -s "${efs_mount_point}/conf/vhost-httpd.conf" '/etc/apache2/sites-available/vhost.conf'
   a2ensite vhost
   ;;
 amzn)
@@ -791,8 +795,7 @@ amzn)
   cp "${vhost_root}/_default_/conf/instance-specific-httpd.conf" /etc/httpd/conf.d/this-instance.conf
   sed -i "s|i-instanceid\.cakeit\.nz|${instance_id}.${hosting_domain}|g" /etc/httpd/conf.d/this-instance.conf
   feedback h3 'Include the vhost config on the EFS volume'
-  echo '# Serve the vhosts stored on the EFS volume' > '/etc/httpd/conf.d/vhost.conf'
-  echo "Include ${efs_mount_point}/conf/*.httpd.conf" >> '/etc/httpd/conf.d/vhost.conf'
+  ln -s "${efs_mount_point}/conf/httpd-vhost.conf" '/etc/httpd/conf.d/vhost.conf'
   ;;
 esac
 feedback body 'Set the web server to auto start at boot'
