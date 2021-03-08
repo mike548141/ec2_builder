@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.60-20210308
+# Version:      0.7.61-20210308
 # File:         web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -362,11 +362,12 @@ apt)
   ;;
 esac
 
-#### Check cloud-init for warrning or error messages
-#### Need to re-test against sshaudit and rebex
-#### Also test TLS HTTP2 HSTS etc
+#####
 #ERROR: cannot verify cakeit.nz's certificate, issued by ‘CN=Let's Encrypt Authority X3,O=Let's Encrypt,C=US’:
 # web2.cakeit.nz (_default_ instance cert) seems to be using cakeit.nz vhost cert. Are vhosts working properly i.e default vs cakeit.nz
+## Check cloud-init for warrning or error messages
+## Need to re-test against sshaudit and rebex
+## Also test TLS HTTP2 HSTS etc
 
 # Configure the OpenSSH server
 feedback h1 'Harden the OpenSSH daemon'
@@ -394,6 +395,7 @@ then
 fi
 # Use the cipher tech that we trust, tested against https://www.sshaudit.com/
 feedback h3 'Adding the child SSHD configs to harden the server'
+feedback body 'Host keys'
 cat <<***EOF*** > '/etc/ssh/sshd_config.d/host_key.conf'
 # SSHD host keys
 HostKey /etc/ssh/ssh_host_ed25519_key
@@ -403,22 +405,27 @@ HostKey /etc/ssh/ssh_host_rsa_key
 HostKeyAlgorithms ssh-ed25519,rsa-sha2-512,rsa-sha2-256
 #HostKeyAlgorithms ssh-ed25519,ssh-ed25519-cert-v01@openssh.com,sk-ssh-ed25519@openssh.com,sk-ssh-ed25519-cert-v01@openssh.com,rsa-sha2-256,rsa-sha2-512,rsa-sha2-256-cert-v01@openssh.com,rsa-sha2-512-cert-v01@openssh.com
 ***EOF***
+feedback body 'Key exchange algorithms'
 cat <<***EOF*** > '/etc/ssh/sshd_config.d/key_exchange.conf'
 # Allowed key exchange algorithms
 KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group18-sha512,diffie-hellman-group16-sha512,diffie-hellman-group-exchange-sha256
 ***EOF***
+feedback body 'Ciphers'
 cat <<***EOF*** > '/etc/ssh/sshd_config.d/cipher.conf'
 # Allowed encryption algorithms (aka ciphers)
 Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr
 ***EOF***
+feedback body 'Message Authentication Code (MAC) algorithms'
 cat <<***EOF*** > '/etc/ssh/sshd_config.d/mac.conf'
 # Allowed Message Authentication Code (MAC) algorithms
 MACs hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com,umac-128-etm@openssh.com
 ***EOF***
+feedback body 'SSH protocol'
 cat <<***EOF*** > '/etc/ssh/sshd_config.d/protocol.conf'
 # Allowed SSH protocols
 Protocol 2
 ***EOF***
+feedback body 'SSHD authentication config'
 cat <<***EOF*** > '/etc/ssh/sshd_config.d/authentication.conf'
 # Authentication related config
 PubkeyAuthentication yes
@@ -432,6 +439,7 @@ PermitEmptyPasswords no
 Banner /etc/ssh/sshd_banner
 AllowGroups ssh
 ***EOF***
+feedback body 'SSHD session config'
 cat <<***EOF*** > '/etc/ssh/sshd_config.d/session.conf'
 # SSH session related config
 ClientAliveInterval 300
@@ -440,6 +448,7 @@ MaxSessions 10
 PrintLastLog yes
 ***EOF***
 # Create a welcome banner
+feedback body 'SSHD welcome banner'
 cat <<***EOF*** > '/etc/ssh/sshd_banner'
 
 ************************************************************************************************************************************************
@@ -461,15 +470,19 @@ amzn)
 esac
 # Harden the server: small Diffie-Hellman are weak, we want 3072 bits or more. A 3072-bit modulus is needed to provide 128 bits of security
 feedback h2 'Enforce Diffie-Hellman Group Exchange (DH-GEX) protocol moduli >= 3072'
-# I am keeping this code as its alot faster than generating a new moduli, I may use it when testing
-#cp '/etc/ssh/moduli' '/etc/ssh/moduli.bak'
-#awk '$5 >= 3071' '/etc/ssh/moduli' > '/etc/ssh/moduli.safe'
-#mv -f '/etc/ssh/moduli.safe' '/etc/ssh/moduli'
-mv -f '/etc/ssh/moduli' '/etc/ssh/moduli.bak'
-feedback h3 'Generate the new moduli, this will take ~4.5 mins on a t3a.nano and is memory intensive'
-ssh-keygen -M generate -O bits=3072 moduli-3072.candidates
-feedback h3 'Screen the new moduli, this will take ~22.5 mins on a t3a.nano and is CPU intensive'
-ssh-keygen -M screen -f moduli-3072.candidates moduli
+if [ 'modulus' == 'slow' ]
+then
+  # I am keeping this code as its alot faster than generating a new moduli so I may use it when testing
+  cp '/etc/ssh/moduli' '/etc/ssh/moduli.bak'
+  awk '$5 >= 3071' '/etc/ssh/moduli' > '/etc/ssh/moduli.safe'
+  mv -f '/etc/ssh/moduli.safe' '/etc/ssh/moduli'
+else
+  mv -f '/etc/ssh/moduli' '/etc/ssh/moduli.bak'
+  feedback h3 "Generate the new moduli, this will take ~4.5 mins on a t3a.nano and is memory intensive. Started: $(date)"
+  ssh-keygen -M generate -O bits=3072 '/etc/ssh/moduli-3072.candidates'
+  feedback h3 "Screen the new moduli, this will take ~22.5 mins on a t3a.nano and is CPU intensive. Started: $(date)"
+  ssh-keygen -M screen -f '/etc/ssh/moduli-3072.candidates' '/etc/ssh/moduli'
+fi
 # We are done
 feedback h2 'Restart OpenSSH server'
 systemctl restart sshd.service
@@ -490,7 +503,7 @@ then
 fi
 
 # Create the local users on the host
-## This should really link back to a central user repo and users get created dynamically
+## This should really link back to a central user repo and users get created dynamically when they login e.g. Google SAML IDP
 feedback h1 'Create the user mike and a home directory'
 useradd --create-home -c 'Mike Clements' 'mike'
 feedback h3 'Add to ssh and sudo groups for access'
@@ -661,7 +674,7 @@ feedback h1 'Import the common variables from EFS'
 source "${efs_mount_point}/script/common_variables.sh"
 
 # Create a directory for this instances log files on the EFS volume
-### Probably remove this section, should not be used anymore but need to check that
+#### Probably remove this section, should not be used anymore but need to check that
 feedback h1 'Create a space for this instances log files on the EFS volume'
 mkdir --parents "${vhost_root}/_default_/log/${instance_id}.${hosting_domain}"
 
@@ -902,14 +915,14 @@ esac
 feedback h2 'Get Lets Encrypt certificates for this server'
 # The contact email address for Lets Encrypt if a certificate problem comes up
 pki_email=$(aws ssm get-parameter --name "${app_parameters}/pki/email" --query 'Parameter.Value' --output text --region ${aws_region})
-mkdir --parents "/var/log/letsencrypt"
-certbot certonly --domains "${instance_id}.${hosting_domain},web2.${hosting_domain}" --apache --non-interactive --agree-tos --email "${pki_email}" --no-eff-email --logs-dir "/var/log/letsencrypt" --redirect --must-staple --staple-ocsp --hsts --uir
+mkdir --parents '/var/log/letsencrypt'
+certbot certonly --domains "${instance_id}.${hosting_domain},web2.${hosting_domain}" --apache --non-interactive --agree-tos --email "${pki_email}" --no-eff-email --logs-dir '/var/log/letsencrypt' --redirect --must-staple --staple-ocsp --hsts --uir
 
 # Customise the _default_ vhost config to include the new certificate created by certbot
 if [ -f "/etc/letsencrypt/live/${instance_id}.${hosting_domain}/fullchain.pem" ] && [ -f "/etc/letsencrypt/live/${instance_id}.${hosting_domain}/privkey.pem" ]
 then
   feedback h3 'Add the certificates to the web server config'
-  ### Check this sed works
+  #### Check this sed works
   sed -i "s|[^#]SSLCertificateFile| #SSLCertificateFile|g; \
           s|[^#]SSLCertificateKeyFile| #SSLCertificateKeyFile|g; \
           s|#SSLCertificateFile[ \t]*/etc/letsencrypt/live/|SSLCertificateFile\t\t/etc/letsencrypt/live/|; \
@@ -989,5 +1002,5 @@ grep -i 'warn' '/var/log/cloud-init-output.log' | sort | uniq >> ~/for_review.lo
 
 # Thats all I wrote
 feedback title "Build script finished - https://${instance_id}.${hosting_domain}/wiki/"
-### add a reboot
+### add a reboot to enable apparmor?
 exit 0
