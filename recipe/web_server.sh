@@ -223,9 +223,15 @@ pkgmgr () {
     # Check each of the packages just installed are showing as installed
     for one_pkg in ${2}
     do
-      if [ -z "$(apt list --installed ${one_pkg} | grep -v '^Listing')" ]
+      if [ $(echo ${one_pkg} | grep '\/') ] || [ $(echo ${one_pkg} | grep '\.deb$') ]
       then
-        feedback error "The package ${one_pkg} has not installed properly"
+        local one_clean_pkg=$(dpkg --info ${one_pkg} | grep ' Package: ' | sed 's|^ Package: ||;')
+      else
+        local one_clean_pkg=${one_pkg}
+      fi
+      if [ -z "$(apt list --installed ${one_clean_pkg} | grep -v '^Listing')" ]
+      then
+        feedback error "The package ${one_clean_pkg} has not installed properly"
       fi
     done
     ;;
@@ -910,7 +916,7 @@ then
     sed -i "s|[^#]SSLCertificateFile| #SSLCertificateFile|g; \
             s|[^#]SSLCertificateKeyFile| #SSLCertificateKeyFile|g; \
             s|#SSLCertificateFile[ \t]*/etc/letsencrypt/live/|SSLCertificateFile\t\t/etc/letsencrypt/live/|; \
-            s|#SSLCertificateKeyFile[ \t]*/etc/letsencrypt/live/|SSLCertificateKeyFile\t\t/etc/letsencrypt/live/|;" '/etc/apache2/sites-available/vhost.conf'
+            s|#SSLCertificateKeyFile[ \t]*/etc/letsencrypt/live/|SSLCertificateKeyFile\t\t/etc/letsencrypt/live/|;" '/etc/apache2/sites-available/this-instance.conf'
     ;;
   amzn)
     sed -i "s|[^#]SSLCertificateFile| #SSLCertificateFile|g; \
@@ -928,7 +934,8 @@ feedback h3 'Setup the vhosts Lets Encrypt configs on this server'
 ${efs_mount_point}/script/update_instance-vhosts_pki.sh
 
 
-### Server signature is over-sharing
+### Server signature is over-sharing - no os, no sub versions e.g. just Apache/2
+#### Still issue where cakeit.nz is using the instances cert
 
 
 # Add a job to cron to run certbot regularly for renewals and revocations
@@ -937,7 +944,9 @@ cat <<***EOF*** > '/etc/cron.daily/certbot'
 #!/usr/bin/env bash
 
 # Update this instances configuration including what certificates need to be renewed
+feedback h3 'Link vhost PKI configs and renew certificates'
 ${efs_mount_point}/script/update_instance-vhosts_pki.sh
+certbot renew --no-self-upgrade
 
 # Run Lets Encrypt Certbot to revoke and/or renew certiicates
 certbot renew --no-self-upgrade
