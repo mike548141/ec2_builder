@@ -791,6 +791,8 @@ ubuntu)
   pkgmgr install 'apache2 apache2-doc apache2-suexec-pristine'
   httpd_service='apache2.service'
   a2disconf apache2-doc
+  a2enconf javascript-common
+  a2enconf php7.4-fpm
   a2enmod headers
   a2enmod http2
   a2enmod rewrite
