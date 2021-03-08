@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.61-20210308
+# Version:      0.7.62-20210309
 # File:         web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -361,12 +361,6 @@ apt)
   pkgmgr install 'debconf-utils'
   ;;
 esac
-
-#####
-## Need to re-test against sshaudit and rebex
-## Also test TLS HTTP2 HSTS etc
-#### Server signature is over-sharing
-
 
 # Configure the OpenSSH server
 feedback h1 'Harden the OpenSSH daemon'
@@ -921,7 +915,6 @@ certbot certonly --domains "${instance_id}.${hosting_domain},web2.${hosting_doma
 if [ -f "/etc/letsencrypt/live/${instance_id}.${hosting_domain}/fullchain.pem" ] && [ -f "/etc/letsencrypt/live/${instance_id}.${hosting_domain}/privkey.pem" ]
 then
   feedback h3 'Add the certificates to the web server config'
-  ### Check this worked
   case ${hostos_id} in
   ubuntu)
     sed -i "s|[^#]SSLCertificateFile| #SSLCertificateFile|g; \
@@ -945,7 +938,7 @@ feedback h3 'Setup the vhosts Lets Encrypt configs on this server'
 ${efs_mount_point}/script/update_instance-vhosts_pki.sh
 
 
-###### It breaks here. most likely the exit from common_variables
+#### Server signature is over-sharing
 
 
 

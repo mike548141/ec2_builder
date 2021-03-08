@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.2.1-20210307
+# Version:      0.2.2-20210309
 # File:         common_variables.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -94,13 +94,6 @@ get_public_ip () {
 #======================================
 # Say hello
 #--------------------------------------
-# Check if the script has already been run to save CPU cycles
-if [ ! -z "${common_variables}" ]
-then
-  feedback body 'The common variables have already been set, skipping'
-  exit 1
-  ###### the exit causes parent scripts to exit prematurely
-fi
 
 #======================================
 # Declare the constants
