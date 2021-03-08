@@ -362,6 +362,11 @@ apt)
   ;;
 esac
 
+##### https://www.sshaudit.com/
+# Remove ssh-rsa host key
+# diffie-hellman-group-exchange-sha256 (2048-bit) - A 3072-bit modulus is needed to provide 128 bits of security, but a 2048-bit modulus is in use. Score reduced by 1.
+
+
 # Configure the OpenSSH server
 feedback h1 'Harden the OpenSSH daemon'
 if [ ! $(getent group ssh_keys) ]
@@ -393,7 +398,7 @@ mkdir --parents /etc/ssh/sshd_config.d/
 if [ -z "$(grep -i 'Include \/etc\/ssh\/sshd_config\.d\/\*\.conf' '/etc/ssh/sshd_config')" ]
 then
   ## Ubuntu has this by default, AL2's version of openssh-server (7.4p1-21.amzn2.0.1) does not support it
-  feedback error 'SSHD child config added to /etc/ssh/sshd_config but commented out. Please uncomment and restart the service to complete the hardening of SSHD'
+  feedback error 'Hardening ineffective. SSHD child config added to /etc/ssh/sshd_config but commented out. Please uncomment and restart the service to complete the hardening of SSHD'
   echo '#Include /etc/ssh/sshd_config.d/*.conf' >> '/etc/ssh/sshd_config'
 fi
 # Use the cipher tech that we trust, tested against https://www.sshaudit.com/
@@ -738,7 +743,7 @@ systemctl -l status ${php_service}
 
 #### Check cloud-init for warrning or error messages
 #ERROR: cannot verify cakeit.nz's certificate, issued by ‘CN=Let's Encrypt Authority X3,O=Let's Encrypt,C=US’:
-
+# web2.cakeit.nz (_default_ instance cert) seems to be using cakeit.nz vhost cert. Are vhosts working properly i.e default vs cakeit.nz
 
 
 
