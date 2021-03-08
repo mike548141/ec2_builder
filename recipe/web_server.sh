@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.59-20210307
+# Version:      0.7.60-20210308
 # File:         web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -722,28 +722,24 @@ amzn)
   php_service='php-fpm.service'
   # Create a PHP config for the _default_ vhost
   feedback h3 'Create a PHP-FPM config on EBS for this instances _default_ vhost'
-  cp "${vhost_root}/_default_/conf/instance-specific-php-fpm.conf" /etc/php-fpm.d/this-instance.conf
-  sed -i "s|i-.*\.cakeit\.nz|${instance_id}.${hosting_domain}|g" /etc/php-fpm.d/this-instance.conf
+  cp "${vhost_root}/_default_/conf/instance-specific-php-fpm.conf" '/etc/php-fpm.d/this-instance.conf'
+  sed -i "s|i-.*\.cakeit\.nz|${instance_id}.${hosting_domain}|g" '/etc/php-fpm.d/this-instance.conf'
   # Include the vhost config on the EFS volume
   feedback h3 'Include the vhost config on the EFS volume'
   echo '; Include the vhosts stored on the EFS volume' > '/etc/php-fpm.d/vhost.conf'
   echo "include=${efs_mount_point}/conf/*.php-fpm.conf" >> '/etc/php-fpm.d/vhost.conf'
   ;;
 esac
+# Create folder to php logs for the instance (not the vhosts)
+mkdir --parents '/var/log/php'
 feedback h3 'Restart PHP-FPM to recognise the additional PHP modules and config'
 systemctl restart ${php_service}
 systemctl -l status ${php_service}
 
-#Mar 07 12:02:08 ip-172-31-77-82 php-fpm7.4[44633]: [07-Mar-2021 12:02:08] ERROR: [/etc/php/7.4/fpm/pool.d/this-instance.conf:7] unknown entry 'listen.acl_users'
-# cakeit.nz as well line 7
-#failed to open access log (/var/log/php/access.log): No such file or directory (2)
-#www-data
-
 #### Check cloud-init for warrning or error messages
-#update-rc.d: warning: start and stop actions are no longer supported; falling back to defaults
-#/usr/lib/python3/dist-packages/jmespath/visitor.py:32: SyntaxWarning: "is" with a literal. Did you mean "=="?
-#Warning: The home dir /var/run/stunnel4 you specified can't be accessed: No such file or directory
 #ERROR: cannot verify cakeit.nz's certificate, issued by ‘CN=Let's Encrypt Authority X3,O=Let's Encrypt,C=US’:
+
+
 
 
 # Install MariaDB server to host databases as Aurora Serverless resume is too slow (~25s from cold to warm). This section will only be used for standalone installs. Eventually this will either use a dedicated EC2 running MariaDB or AWS RDS Aurora
@@ -803,7 +799,7 @@ systemctl enable ${httpd_service}
 # The vhosts httpd config points to this conf file, it won't exist yet since LetsEncrypt has not run yet. This creates an empty file so that httpd can load.
 if [ ! -f '/etc/letsencrypt/options-ssl-apache.conf' ]
 then
-  feedback h3 'Create an empty options-ssl-apache.conf because the vhosts depend upon it'
+  feedback h3 'Create an empty options-ssl-apache.conf because the vhost configs reference it'
   mkdir '/etc/letsencrypt'
   touch '/etc/letsencrypt/options-ssl-apache.conf'
 fi
@@ -957,6 +953,10 @@ WantedBy=multi-user.target
 ***EOF***
 ln -s /opt/ookla/server/ookla-server.service /etc/systemd/system/ookla-server.service
 systemctl daemon-reload
+
+# Grab warnings and errors to review
+grep -i 'error' /var/log/cloud-init-output.log | sort | uniq > ~/for_review.log
+grep -i 'warn' /var/log/cloud-init-output.log | sort | uniq >> ~/for_review.log
 
 # Thats all I wrote
 feedback title "Build script finished - https://${instance_id}.${hosting_domain}/wiki/"
