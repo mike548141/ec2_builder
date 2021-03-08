@@ -362,17 +362,16 @@ apt)
   ;;
 esac
 
-##### Need to re-test against sshaudit and rebex
+#### Check cloud-init for warrning or error messages
+#### Need to re-test against sshaudit and rebex
 #### Also test TLS HTTP2 HSTS etc
-# diffie-hellman-group-exchange-sha256 (2048-bit) - A 3072-bit modulus is needed to provide 128 bits of security, but a 2048-bit modulus is in use. Score reduced by 1.
-# Instead of the awk
-#ssh-keygen -M generate -O bits=3072 moduli-3072.candidates
-#ssh-keygen -M screen -f moduli-3072.candidates moduli-3072
+#ERROR: cannot verify cakeit.nz's certificate, issued by ‘CN=Let's Encrypt Authority X3,O=Let's Encrypt,C=US’:
+# web2.cakeit.nz (_default_ instance cert) seems to be using cakeit.nz vhost cert. Are vhosts working properly i.e default vs cakeit.nz
 
 # Configure the OpenSSH server
 feedback h1 'Harden the OpenSSH daemon'
 # New host keys incase they are compromised
-feedback h3 'Re-generate the RSA and ED25519 keys'
+feedback h2 'Re-generate the RSA and ED25519 keys'
 rm --force /etc/ssh/ssh_host_*
 ssh-keygen -t rsa -b 4096 -f '/etc/ssh/ssh_host_rsa_key' -N ""
 chown root:root '/etc/ssh/ssh_host_rsa_key'
@@ -380,16 +379,12 @@ chmod 0600 '/etc/ssh/ssh_host_rsa_key'
 ssh-keygen -t ed25519 -f '/etc/ssh/ssh_host_ed25519_key' -N ""
 chown root:root '/etc/ssh/ssh_host_ed25519_key'
 chmod 0600 '/etc/ssh/ssh_host_ed25519_key'
-# Harden the server: small Diffie-Hellman are weak
-feedback h3 'Remove small Diffie-Hellman moduli'
-cp '/etc/ssh/moduli' '/etc/ssh/moduli.bak'
-awk '$5 >= 3071' '/etc/ssh/moduli' > '/etc/ssh/moduli.safe'
-mv -f '/etc/ssh/moduli.safe' '/etc/ssh/moduli'
+feedback h2 'Configuration changes'
 # Harden the server: DSA and ECDSA host keys can't be trusted
 feedback h3 'Disable any host keys in the main SSHD config'
 cp '/etc/ssh/sshd_config' '/etc/ssh/sshd_config.bak'
 sed -i 's|^HostKey[ \t]|#HostKey |g' '/etc/ssh/sshd_config'
-# Child configs for SSHD
+# Support child configs for SSHD
 mkdir --parents '/etc/ssh/sshd_config.d/'
 if [ -z "$(grep -i 'Include \/etc\/ssh\/sshd_config\.d\/\*\.conf' '/etc/ssh/sshd_config')" ]
 then
@@ -455,7 +450,7 @@ cat <<***EOF*** > '/etc/ssh/sshd_banner'
 ************************************************************************************************************************************************
 
 ***EOF***
-feedback h3 'Granting the default user SSH access'
+feedback h3 'Granting the default EC2 user SSH access'
 case ${hostos_id} in
 ubuntu)
   usermod -aG 'ssh' 'ubuntu'
@@ -464,7 +459,19 @@ amzn)
   usermod -aG 'ssh' 'ec2-user'
   ;;
 esac
-feedback h3 'Restart OpenSSH server'
+# Harden the server: small Diffie-Hellman are weak, we want 3072 bits or more. A 3072-bit modulus is needed to provide 128 bits of security
+feedback h2 'Enforce Diffie-Hellman Group Exchange (DH-GEX) protocol moduli >= 3072'
+# I am keeping this code as its alot faster than generating a new moduli, I may use it when testing
+#cp '/etc/ssh/moduli' '/etc/ssh/moduli.bak'
+#awk '$5 >= 3071' '/etc/ssh/moduli' > '/etc/ssh/moduli.safe'
+#mv -f '/etc/ssh/moduli.safe' '/etc/ssh/moduli'
+mv -f '/etc/ssh/moduli' '/etc/ssh/moduli.bak'
+feedback h3 'Generate the new moduli, this will take ~4.5 mins on a t3a.nano and is memory intensive'
+ssh-keygen -M generate -O bits=3072 moduli-3072.candidates
+feedback h3 'Screen the new moduli, this will take ~22.5 mins on a t3a.nano and is CPU intensive'
+ssh-keygen -M screen -f moduli-3072.candidates moduli
+# We are done
+feedback h2 'Restart OpenSSH server'
 systemctl restart sshd.service
 systemctl -l status sshd.service
 
@@ -762,12 +769,6 @@ mkdir --parents '/var/log/php'
 feedback h3 'Restart PHP-FPM to recognise the additional PHP modules and config'
 systemctl restart ${php_service}
 systemctl -l status ${php_service}
-
-#### Check cloud-init for warrning or error messages
-#ERROR: cannot verify cakeit.nz's certificate, issued by ‘CN=Let's Encrypt Authority X3,O=Let's Encrypt,C=US’:
-# web2.cakeit.nz (_default_ instance cert) seems to be using cakeit.nz vhost cert. Are vhosts working properly i.e default vs cakeit.nz
-
-
 
 # Install MariaDB server to host databases as Aurora Serverless resume is too slow (~25s from cold to warm). This section will only be used for standalone installs. Eventually this will either use a dedicated EC2 running MariaDB or AWS RDS Aurora
 feedback h1 'MariaDB (MySQL) server'
