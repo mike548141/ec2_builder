@@ -99,6 +99,7 @@ if [ ! -z "${common_variables}" ]
 then
   feedback body 'The common variables have already been set, skipping'
   exit 1
+  ###### the exit causes parent scripts to exit prematurely
 fi
 
 #======================================

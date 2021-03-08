@@ -363,11 +363,10 @@ apt)
 esac
 
 #####
-#ERROR: cannot verify cakeit.nz's certificate, issued by ‘CN=Let's Encrypt Authority X3,O=Let's Encrypt,C=US’:
-# web2.cakeit.nz (_default_ instance cert) seems to be using cakeit.nz vhost cert. Are vhosts working properly i.e default vs cakeit.nz
-## Check cloud-init for warrning or error messages
 ## Need to re-test against sshaudit and rebex
 ## Also test TLS HTTP2 HSTS etc
+#### Server signature is over-sharing
+
 
 # Configure the OpenSSH server
 feedback h1 'Harden the OpenSSH daemon'
@@ -922,17 +921,35 @@ certbot certonly --domains "${instance_id}.${hosting_domain},web2.${hosting_doma
 if [ -f "/etc/letsencrypt/live/${instance_id}.${hosting_domain}/fullchain.pem" ] && [ -f "/etc/letsencrypt/live/${instance_id}.${hosting_domain}/privkey.pem" ]
 then
   feedback h3 'Add the certificates to the web server config'
-  #### Check this sed works
-  sed -i "s|[^#]SSLCertificateFile| #SSLCertificateFile|g; \
-          s|[^#]SSLCertificateKeyFile| #SSLCertificateKeyFile|g; \
-          s|#SSLCertificateFile[ \t]*/etc/letsencrypt/live/|SSLCertificateFile\t\t/etc/letsencrypt/live/|; \
-          s|#SSLCertificateKeyFile[ \t]*/etc/letsencrypt/live/|SSLCertificateKeyFile\t\t/etc/letsencrypt/live/|;" '/etc/httpd/conf.d/this-instance.conf'
+  ### Check this worked
+  case ${hostos_id} in
+  ubuntu)
+    sed -i "s|[^#]SSLCertificateFile| #SSLCertificateFile|g; \
+            s|[^#]SSLCertificateKeyFile| #SSLCertificateKeyFile|g; \
+            s|#SSLCertificateFile[ \t]*/etc/letsencrypt/live/|SSLCertificateFile\t\t/etc/letsencrypt/live/|; \
+            s|#SSLCertificateKeyFile[ \t]*/etc/letsencrypt/live/|SSLCertificateKeyFile\t\t/etc/letsencrypt/live/|;" '/etc/apache2/sites-available/vhost.conf'
+    ;;
+  amzn)
+    sed -i "s|[^#]SSLCertificateFile| #SSLCertificateFile|g; \
+            s|[^#]SSLCertificateKeyFile| #SSLCertificateKeyFile|g; \
+            s|#SSLCertificateFile[ \t]*/etc/letsencrypt/live/|SSLCertificateFile\t\t/etc/letsencrypt/live/|; \
+            s|#SSLCertificateKeyFile[ \t]*/etc/letsencrypt/live/|SSLCertificateKeyFile\t\t/etc/letsencrypt/live/|;" '/etc/httpd/conf.d/this-instance.conf'
+    ;;
+  esac
   feedback h3 'Restart the web server'
   systemctl restart ${httpd_service}
 fi
+
 # Link each of the vhosts listed in vhosts-httpd.conf to letsencrypt on this instance. So that all instances can renew all certificates as required
-feedback h3 'Include the vhosts Lets Encrypt config on this server'
-source "${efs_mount_point}/script/update_instance-vhosts_pki.sh"
+feedback h3 'Setup the vhosts Lets Encrypt configs on this server'
+${efs_mount_point}/script/update_instance-vhosts_pki.sh
+
+
+###### It breaks here. most likely the exit from common_variables
+
+
+
+
 # Add a job to cron to run certbot regularly for renewals and revocations
 feedback h3 'Add a job to cron to run certbot daily'
 cat <<***EOF*** > '/etc/cron.daily/certbot'
