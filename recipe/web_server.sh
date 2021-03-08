@@ -220,7 +220,14 @@ pkgmgr () {
       local exit_code=${?}
       ;;
     esac
-    ### Check each package in the array was installed
+    # Check each of the packages just installed are showing as installed
+    for one_pkg in ${2}
+    do
+      if [ -z "$(apt list --installed ${one_pkg} | grep -v '^Listing')" ]
+      then
+        feedback error "The package ${one_pkg} has not installed properly"
+      fi
+    done
     ;;
   *)
     feedback error "The package manager function can not understand the command ${1}"
@@ -940,7 +947,7 @@ feedback h3 'Setup the vhosts Lets Encrypt configs on this server'
 ${efs_mount_point}/script/update_instance-vhosts_pki.sh
 
 
-#### Server signature is over-sharing
+### Server signature is over-sharing
 
 
 
