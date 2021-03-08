@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.62-20210309
+# Version:      0.7.63-20210309
 # File:         web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -242,25 +242,6 @@ pkgmgr () {
   # Wait for the package manager to terminate
   check_pid_lock ${packmgr}
 }
-## I don't really want this type of error handling anymore but the code is useful reference
-#feedback body 'Retrying install in 60 seconds'
-#sleep 60
-#feedback h3 'Running yum-complete-transaction -y'
-#yum-complete-transaction -y
-#exit_code=${?}
-#feedback body "Exit code ${exit_code}"
-#feedback h3 'Running yum history redo last'
-#yum history redo last
-#exit_code=${?}
-#feedback body "Exit code ${exit_code}"
-#feedback h3 'Running yum clean all'
-#yum clean all
-#exit_code=${?}
-#feedback body "Exit code ${exit_code}"
-#feedback h3 "Running yum --assumeyes install ${2}"
-#yum --assumeyes install ${2}
-#exit_code=${?}
-#feedback body "Exit code ${exit_code}"
 
 # Wrap the amazon_linux_extras script with additional steps
 manage_ale () {
@@ -948,8 +929,6 @@ ${efs_mount_point}/script/update_instance-vhosts_pki.sh
 
 
 ### Server signature is over-sharing
-
-
 
 
 # Add a job to cron to run certbot regularly for renewals and revocations
