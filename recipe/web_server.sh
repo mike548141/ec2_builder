@@ -69,6 +69,13 @@
 #   * Ideally this would use IAM users to support MFA and a user ID that could tie to other services e.g. a S3 bucket dedicated to a IAM user
 #   * Swap from Let's Encrypt to AWS ACM for public certs. Removes the external dependency. Keep the Lets Encrypt code for future use
 #
+## Next
+# Move all websites to web2.cakeit.nz. Kill web1 on lightsail
+# Create Bodycorp website on wordpress. Upload rules, entitlements, code of conduct etc
+# --> Code of conduct for the BC https://mail.google.com/mail/u/0/#drafts/KtbxLvgpngQdZhvbwdFvccNRGqLQjxzGmL (see stickie note on MBP)
+# Put my cool HTML5 website up on nova.net.nz again, latest version on the NAS?
+# I want to show what you can tell about a web visitor (device, past usage like browsing histroy and the person), how you can track their usage and geophysical. Like deviceinfo.me. With no tag it just shows a generic page, with tag (e.g. https://ushare.myspot.nz/share?showme=yes) it shows the end user what I can see. Some of the other pages in my Hack --> Track show better info that deviceinfo.me like which social media logins you are authenticated too https://browserleaks.com/social
+# --> Catch Facebook scammer pretending to be graeme dean
 
 #======================================
 # Declare the arrays
@@ -459,6 +466,7 @@ amzn)
 esac
 # Harden the server: small Diffie-Hellman are weak, we want 3072 bits or more. A 3072-bit modulus is needed to provide 128 bits of security
 feedback h2 'Enforce Diffie-Hellman Group Exchange (DH-GEX) protocol moduli >= 3072 bits'
+## fast = slow
 if [ 'fast' == 'fast' ]
 then
   # I am keeping this code as its alot faster than generating a new moduli so I may use it when testing
@@ -499,7 +507,7 @@ feedback h3 'Add SSH key'
 mkdir --parents '/home/mike/.ssh'
 chown mike:mike '/home/mike/.ssh'
 chmod 0700 '/home/mike/.ssh'
-wget --tries=2 -O '/home/mike/.ssh/authorized_keys' 'https://www.cakeit.nz/identity/mike.clements/mike-ssh.pub'
+wget --tries=2 -O '/home/mike/.ssh/authorized_keys' 'https://cakeit.nz/identity/mike.clements/mike-ssh.pub'
 chmod 0600 '/home/mike/.ssh/authorized_keys'
 #### Received disconnect from 3.209.113.180 port 22:2: Too many authentication failures - PKI auth isn't working
 
@@ -739,9 +747,10 @@ pkgmgr install 'nodejs npm'
 # PHP
 case ${hostos_id} in
 ubuntu)
-  pkgmgr install 'php-cli php-fpm php-common php-json php-bcmath php-gd php-intl php-mbstring php-xml php-pear'
+  pkgmgr install 'php-cli php-fpm php-common php-mysql php-apcu php-json php-bcmath php-gd php-intl php-mbstring php-xml php-pear'
   php_service='php7.4-fpm.service'
   php_conf='/etc/php/7.4/fpm/pool.d'
+  mv "${php_conf}/www.conf" "${php_conf}/www.conf.disable"
   ;;
 amzn)
   manage_ale enable 'php7.3'
@@ -772,15 +781,42 @@ systemctl enable mariadb.service
 feedback h3 'Start the database server'
 systemctl restart mariadb.service
 
+
+
+##### Problem for HTTP/2: Module mpm_event disabled. Enabling module mpm_prefork. apache2_switch_mpm Switch to prefork
+# with apache running its unbearably slow, because of MPM prefork maybe?
+#a2dismod mpm_prefork
+#ERROR: The following modules depend on mpm_prefork and need to be disabled first: php7.4
+# Error 503 with php pages
+
+systemctl stop apache2
+a2dismod php7.4
+a2dismod mpm_prefork
+a2enmod mpm_event
+a2enconf php7.4-fpm
+a2enmod proxy
+a2enmod proxy_fcgi
+systemctl restart apache2
+systemctl -l status apache2
+systemctl restart php7.4-fpm
+systemctl -l status php7.4-fpm
+
+a2dismod fcgid
+
+# Removed the install of package: libapache2-mod-php
+
+
 # Install the web server
 feedback h1 'Install the web server'
 case ${hostos_id} in
 ubuntu)
-  pkgmgr install 'apache2 apache2-doc apache2-suexec-pristine'
+  pkgmgr install 'apache2 apache2-doc libapache2-mod-fcgid apache2-suexec-pristine'
   httpd_service='apache2.service'
   httpd_conf='/etc/apache2/sites-available'
   a2disconf apache2-doc
   a2enconf javascript-common
+  # PHP-FPM
+  a2enmod proxy_fcgi setenvif
   a2enconf php7.4-fpm
   a2enmod headers
   a2enmod http2
@@ -918,19 +954,12 @@ then
 else
   feedback error 'Failed to create the instances certificates, the web server will use the default (outdated) ones on EFS'
 fi
-
 # Link each of the vhosts listed in vhosts-httpd.conf to letsencrypt on this instance. So that all instances can renew all certificates as required
-feedback h3 'Setup the vhosts Lets Encrypt configs on this server'
+feedback h3 'Setup the vhosts PKI configs on this instance'
 ${efs_mount_point}/script/update_instance-vhosts_pki.sh
 # Run Lets Encrypt Certbot to revoke and/or renew certiicates
+feedback h3 'Renew all certificates'
 certbot renew --no-self-upgrade
-
-
-
-### Server signature is over-sharing - no os, no sub versions e.g. just Apache/2
-### PHP isn't working - wiki's not loading
-
-
 # Add a job to cron to run certbot regularly for renewals and revocations
 feedback h3 'Add a job to cron to run certbot daily'
 cat <<***EOF*** > '/etc/cron.daily/certbot'
