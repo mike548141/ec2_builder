@@ -784,33 +784,31 @@ systemctl restart mariadb.service
 
 
 ##### Problem for HTTP/2: Module mpm_event disabled. Enabling module mpm_prefork. apache2_switch_mpm Switch to prefork
-# with apache running its unbearably slow, because of MPM prefork maybe?
+
+#systemctl stop apache2
+#a2dismod php7.4
 #a2dismod mpm_prefork
-#ERROR: The following modules depend on mpm_prefork and need to be disabled first: php7.4
-# Error 503 with php pages
+#a2enmod mpm_event
+#a2enconf php7.4-fpm
+#a2enmod proxy
+#a2enmod proxy_fcgi
+#systemctl restart apache2
+#systemctl -l status apache2
+#systemctl restart php7.4-fpm
+#systemctl -l status php7.4-fpm
 
-systemctl stop apache2
-a2dismod php7.4
-a2dismod mpm_prefork
-a2enmod mpm_event
-a2enconf php7.4-fpm
-a2enmod proxy
-a2enmod proxy_fcgi
-systemctl restart apache2
-systemctl -l status apache2
-systemctl restart php7.4-fpm
-systemctl -l status php7.4-fpm
-
-a2enmod fcgid
+#a2enmod fcgid
 
 # Removed the install of package: libapache2-mod-php
+# remove libapache2-mod-fcgid
+
 
 
 # Install the web server
 feedback h1 'Install the web server'
 case ${hostos_id} in
 ubuntu)
-  pkgmgr install 'apache2 apache2-doc libapache2-mod-fcgid apache2-suexec-pristine'
+  pkgmgr install 'apache2 apache2-doc apache2-suexec-pristine'
   httpd_service='apache2.service'
   httpd_conf='/etc/apache2/sites-available'
   a2disconf apache2-doc
