@@ -928,7 +928,6 @@ certbot renew --no-self-upgrade
 
 
 ### Server signature is over-sharing - no os, no sub versions e.g. just Apache/2
-##### cakeit.nz is going to _default_ instead of its own vhost
 ### PHP isn't working - wiki's not loading
 
 
