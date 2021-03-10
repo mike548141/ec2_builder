@@ -22,7 +22,7 @@
 # * Do I get the tenancy, resource_environment, service_group etc from the AWS tags on the instance? Fewer values stored in the script & easily editable on the template. Also more reusable/accessible values as tags from both within the instance and from other AWS services
 #   * Need a shared user directory for end users (aka customers)
 # Create the end user accounts, these user accounts are used to login (e.g. using SSH) to manage a vhost and will generally represent a real person.
-## end users is for customers that actually login via services (e.g. web portal/API etc) or shell (SSH/SCP etc)
+# end users is for customers that actually login via services (e.g. web portal/API etc) or shell (SSH/SCP etc)
 # Get the list of end users from the PKI/SSH keys in vhost/pki?
 # Would be even better if end users used OpenID or oAuth so no credenditals are stored here... Better UX as fewer passwords etc.
 # Not sure if I should/need to specify the UID for end users or leave it to fate
@@ -376,7 +376,7 @@ sed -i 's|^HostKey[ \t]|#HostKey |g' '/etc/ssh/sshd_config'
 mkdir --parents '/etc/ssh/sshd_config.d/'
 if [ -z "$(grep -i 'Include \/etc\/ssh\/sshd_config\.d\/\*\.conf' '/etc/ssh/sshd_config')" ]
 then
-  ## Ubuntu has this by default, AL2's version of openssh-server (7.4p1-21.amzn2.0.1) does not support it
+  # Ubuntu has this by default, AL2's version of openssh-server (7.4p1-21.amzn2.0.1) does not support it
   feedback error 'Hardening ineffective. SSHD child config added to /etc/ssh/sshd_config but commented out. Please uncomment and restart the service to complete the hardening of SSHD'
   echo '#Include /etc/ssh/sshd_config.d/*.conf' >> '/etc/ssh/sshd_config'
 fi
@@ -387,7 +387,9 @@ cat <<***EOF*** > '/etc/ssh/sshd_config.d/host_key.conf'
 # SSHD host keys
 HostKey /etc/ssh/ssh_host_ed25519_key
 HostKey /etc/ssh/ssh_host_rsa_key
-
+***EOF***
+feedback body 'Host key exchange algorithms'
+cat <<***EOF*** > '/etc/ssh/sshd_config.d/host_key_exchange.conf'
 # Allowed host key exchange algorithms
 HostKeyAlgorithms ssh-ed25519,rsa-sha2-512,rsa-sha2-256
 #HostKeyAlgorithms ssh-ed25519,ssh-ed25519-cert-v01@openssh.com,sk-ssh-ed25519@openssh.com,sk-ssh-ed25519-cert-v01@openssh.com,rsa-sha2-256,rsa-sha2-512,rsa-sha2-256-cert-v01@openssh.com,rsa-sha2-512-cert-v01@openssh.com
@@ -429,8 +431,8 @@ AllowGroups ssh
 feedback body 'SSHD session config'
 cat <<***EOF*** > '/etc/ssh/sshd_config.d/session.conf'
 # SSH session related config
-ClientAliveInterval 300
-ClientAliveCountMax 24
+ClientAliveInterval 15
+ClientAliveCountMax 40
 MaxSessions 10
 PrintLastLog yes
 ***EOF***
@@ -456,8 +458,8 @@ amzn)
   ;;
 esac
 # Harden the server: small Diffie-Hellman are weak, we want 3072 bits or more. A 3072-bit modulus is needed to provide 128 bits of security
-feedback h2 'Enforce Diffie-Hellman Group Exchange (DH-GEX) protocol moduli >= 3072'
-if [ 'modulus' == 'slow' ]
+feedback h2 'Enforce Diffie-Hellman Group Exchange (DH-GEX) protocol moduli >= 3072 bits'
+if [ 'fast' == 'fast' ]
 then
   # I am keeping this code as its alot faster than generating a new moduli so I may use it when testing
   cp '/etc/ssh/moduli' '/etc/ssh/moduli.bak'
@@ -491,17 +493,15 @@ fi
 
 # Create the local users on the host
 ## This should really link back to a central user repo and users get created dynamically when they login e.g. Google SAML IDP
-feedback h1 'Create the user mike and a home directory'
-useradd --create-home -c 'Mike Clements' 'mike'
-feedback h3 'Add to ssh and sudo groups for access'
-usermod -aG 'ssh' 'mike'
-usermod -aG 'sudo' 'mike'
+feedback h1 'Create the user mike'
+useradd --shell '/bin/bash' --create-home -c 'Mike Clements' --groups ssh,sudo 'mike'
 feedback h3 'Add SSH key'
 mkdir --parents '/home/mike/.ssh'
 chown mike:mike '/home/mike/.ssh'
 chmod 0700 '/home/mike/.ssh'
-wget --tries=2 -O '/home/mike/.ssh/authorized_keys' 'https://cakeit.nz/identity/mike.clements/mike-ssh.pub'
+wget --tries=2 -O '/home/mike/.ssh/authorized_keys' 'https://www.cakeit.nz/identity/mike.clements/mike-ssh.pub'
 chmod 0600 '/home/mike/.ssh/authorized_keys'
+#### Received disconnect from 3.209.113.180 port 22:2: Too many authentication failures - PKI auth isn't working
 
 # Additional AWS EC2 tools
 feedback h1 'Install AWS tools'
@@ -661,9 +661,9 @@ feedback h1 'Import the common variables from EFS'
 source "${efs_mount_point}/script/common_variables.sh"
 
 # Create a directory for this instances log files on the EFS volume
-#### Probably remove this section, should not be used anymore but need to check that
-feedback h1 'Create a space for this instances log files on the EFS volume'
-mkdir --parents "${vhost_root}/_default_/log/${instance_id}.${hosting_domain}"
+## Probably remove this section, should not be used anymore but need to check that
+#feedback h1 'Create a space for this instances log files on the EFS volume'
+#mkdir --parents "${vhost_root}/_default_/log/${instance_id}.${hosting_domain}"
 
 # Create users and groups for the vhosts on EFS
 # The OS and base AMI packages use 0-1000 for the UID's and GID's they require. I have reserved 1001-2000 for UID's and GID's that are intrinsic to the build. UID & GID 2001 and above are for general use.
@@ -688,7 +688,7 @@ do
     vhost_dir_gid=$(stat -c '%g' "${vhost_root}/${vhost_dir}")
     feedback body "Creating owner ${vhost_dir} with UID/GID ${vhost_dir_uid}/${vhost_dir_gid} for ${vhost_root}/${vhost_dir}"
     groupadd --gid ${vhost_dir_gid} "${vhost_dir}"
-    useradd --uid ${vhost_dir_uid} --gid ${vhost_dir_gid} --shell '/sbin/nologin' --home-dir "${vhost_root}/${vhost_dir}" --no-create-home --groups vhost_owners,vhost_all "${vhost_dir}"
+    useradd --uid ${vhost_dir_uid} --gid ${vhost_dir_gid} --shell '/sbin/nologin' --home-dir "${vhost_root}/${vhost_dir}" --no-create-home --groups vhost_owners,vhost_all -c 'Web space owner' "${vhost_dir}"
   fi
 done
 
@@ -732,38 +732,32 @@ s3fs#${s3_bucket} ${s3_mount_point} fuse _netdev,allow_other,use_path_request_st
 
 # Install scripting languages
 feedback h1 'Install scripting languages'
-pkgmgr install 'python python3'
+pkgmgr install 'python3'
 pkgmgr install 'golang'
 pkgmgr install 'ruby'
 pkgmgr install 'nodejs npm'
 # PHP
 case ${hostos_id} in
 ubuntu)
-  pkgmgr install 'php-cli php-fpm php-common php-pdo php-json php-mysqlnd php-bcmath php-gd php-intl php-mbstring php-xml php-pear'
+  pkgmgr install 'php-cli php-fpm php-common php-json php-bcmath php-gd php-intl php-mbstring php-xml php-pear'
   php_service='php7.4-fpm.service'
-  # Create a PHP config for the _default_ vhost
-  feedback h3 'Create a PHP-FPM config on EBS for this instances _default_ vhost'
-  cp "${vhost_root}/_default_/conf/instance-specific-php-fpm.conf" '/etc/php/7.4/fpm/pool.d/this-instance.conf'
-  sed -i "s|i-.*\.cakeit\.nz|${instance_id}.${hosting_domain}|g" '/etc/php/7.4/fpm/pool.d/this-instance.conf'
-  # Include the vhost config on the EFS volume
-  feedback h3 'Include the vhost config on the EFS volume'
-  echo '; Include the vhosts stored on the EFS volume' > '/etc/php/7.4/fpm/pool.d/vhost.conf'
-  echo "include=${efs_mount_point}/conf/*.php-fpm.conf" >> '/etc/php/7.4/fpm/pool.d/vhost.conf'
+  php_conf='/etc/php/7.4/fpm/pool.d'
   ;;
 amzn)
   manage_ale enable 'php7.3'
   pkgmgr install 'php-cli php-fpm php-common php-pdo php-json php-mysqlnd php-bcmath php-gd php-intl php-mbstring php-xml php-pear php-pecl-apcu php-pecl-imagick php-pecl-libsodium php-pecl-zip'
   php_service='php-fpm.service'
-  # Create a PHP config for the _default_ vhost
-  feedback h3 'Create a PHP-FPM config on EBS for this instances _default_ vhost'
-  cp "${vhost_root}/_default_/conf/instance-specific-php-fpm.conf" '/etc/php-fpm.d/this-instance.conf'
-  sed -i "s|i-.*\.cakeit\.nz|${instance_id}.${hosting_domain}|g" '/etc/php-fpm.d/this-instance.conf'
-  # Include the vhost config on the EFS volume
-  feedback h3 'Include the vhost config on the EFS volume'
-  echo '; Include the vhosts stored on the EFS volume' > '/etc/php-fpm.d/vhost.conf'
-  echo "include=${efs_mount_point}/conf/*.php-fpm.conf" >> '/etc/php-fpm.d/vhost.conf'
+  php_conf='/etc/php-fpm.d'
   ;;
 esac
+# Create a PHP config for the _default_ vhost
+feedback h3 'Create a PHP-FPM config on EBS for this instances _default_ vhost'
+cp "${vhost_root}/_default_/conf/instance-specific-php-fpm.conf" "${php_conf}/999-this-instance.conf"
+sed -i "s|i-.*\.cakeit\.nz|${instance_id}.${hosting_domain}|g" "${php_conf}/999-this-instance.conf"
+# Include the vhost config on the EFS volume
+feedback h3 'Include the vhost config on the EFS volume'
+echo '; Include the vhosts stored on the EFS volume' > "${php_conf}/100-vhost.conf"
+echo "include=${efs_mount_point}/conf/*.php-fpm.conf" >> "${php_conf}/100-vhost.conf"
 # Create folder to php logs for the instance (not the vhosts)
 mkdir --parents '/var/log/php'
 feedback h3 'Restart PHP-FPM to recognise the additional PHP modules and config'
@@ -784,6 +778,7 @@ case ${hostos_id} in
 ubuntu)
   pkgmgr install 'apache2 apache2-doc apache2-suexec-pristine'
   httpd_service='apache2.service'
+  httpd_conf='/etc/apache2/sites-available'
   a2disconf apache2-doc
   a2enconf javascript-common
   a2enconf php7.4-fpm
@@ -791,20 +786,22 @@ ubuntu)
   a2enmod http2
   a2enmod rewrite
   a2enmod ssl
+  a2dissite 000-default
   # Setup the httpd conf for the default vhost specific to this vhosts name
   feedback h3 'Create a _default_ virtual host config on this instance'
-  cp "${vhost_root}/_default_/conf/instance-specific-httpd.conf" '/etc/apache2/sites-available/this-instance.conf'
-  sed -i "s|i-instanceid\.cakeit\.nz|${instance_id}.${hosting_domain}|g" '/etc/apache2/sites-available/this-instance.conf'
-  a2ensite this-instance
+  cp "${vhost_root}/_default_/conf/instance-specific-httpd.conf" "${httpd_conf}/999-this-instance.conf"
+  sed -i "s|i-instanceid\.cakeit\.nz|${instance_id}.${hosting_domain}|g" "${httpd_conf}/999-this-instance.conf"
+  a2ensite 999-this-instance
   # Include all the vhosts that are enabled on the EFS volume mounted
   feedback h3 'Include the vhost config on the EFS volume'
-  ln -s "${efs_mount_point}/conf/vhost-httpd.conf" '/etc/apache2/sites-available/vhost.conf'
-  a2ensite vhost
+  ln -s "${efs_mount_point}/conf/vhost-httpd.conf" "${httpd_conf}/100-vhost.conf"
+  a2ensite 100-vhost
   ;;
 amzn)
   manage_ale enable 'httpd_modules'
   pkgmgr install 'httpd mod_ssl'
   httpd_service='httpd.service'
+  httpd_conf='/etc/httpd/conf.d'
   # Replace the Apache HTTPD MPM module prefork with the module event for HTTP/2 compatibility and to improve server performance
   feedback h3 'Change MPM modules from prefork to event'
   cp '/etc/httpd/conf.modules.d/00-mpm.conf' '/etc/httpd/conf.modules.d/00-mpm.conf.bak'
@@ -812,16 +809,17 @@ amzn)
   sed -i 's|^#LoadModule mpm_event_module modules/mod_mpm_event\.so$|LoadModule mpm_event_module modules/mod_mpm_event.so|' '/etc/httpd/conf.modules.d/00-mpm.conf'
   # Disable the _default_ SSL config as it will be in the server specific config
   feedback h3 'Disable the default SSL config'
-  mv '/etc/httpd/conf.d/ssl.conf' '/etc/httpd/conf.d/ssl.conf.disable'
+  mv "${httpd_conf}/ssl.conf" "${httpd_conf}/ssl.conf.disable"
   # Disable the welcome page config
   feedback h3 'Disable the welcome page config'
-  mv '/etc/httpd/conf.d/welcome.conf' '/etc/httpd/conf.d/welcome.conf.disable'
-  # Create a config for the server on the EBS volume
+  mv "${httpd_conf}/welcome.conf" "${httpd_conf}/welcome.conf.disable"
+  # Setup the httpd conf for the default vhost specific to this vhosts name
   feedback h3 'Create a _default_ virtual host config on this instance'
-  cp "${vhost_root}/_default_/conf/instance-specific-httpd.conf" '/etc/httpd/conf.d/this-instance.conf'
-  sed -i "s|i-instanceid\.cakeit\.nz|${instance_id}.${hosting_domain}|g" '/etc/httpd/conf.d/this-instance.conf'
+  cp "${vhost_root}/_default_/conf/instance-specific-httpd.conf" "${httpd_conf}/999-this-instance.conf"
+  sed -i "s|i-instanceid\.cakeit\.nz|${instance_id}.${hosting_domain}|g" "${httpd_conf}/999-this-instance.conf"
+  # Include all the vhosts that are enabled on the EFS volume mounted
   feedback h3 'Include the vhost config on the EFS volume'
-  ln -s "${efs_mount_point}/conf/httpd-vhost.conf" '/etc/httpd/conf.d/vhost.conf'
+  ln -s "${efs_mount_point}/conf/vhost-httpd.conf" "${httpd_conf}/100-vhost.conf"
   ;;
 esac
 feedback body 'Set the web server to auto start at boot'
@@ -911,31 +909,27 @@ certbot certonly --domains "${instance_id}.${hosting_domain},web2.${hosting_doma
 if [ -f "/etc/letsencrypt/live/${instance_id}.${hosting_domain}/fullchain.pem" ] && [ -f "/etc/letsencrypt/live/${instance_id}.${hosting_domain}/privkey.pem" ]
 then
   feedback h3 'Add the certificates to the web server config'
-  case ${hostos_id} in
-  ubuntu)
-    sed -i "s|[^#]SSLCertificateFile| #SSLCertificateFile|g; \
-            s|[^#]SSLCertificateKeyFile| #SSLCertificateKeyFile|g; \
-            s|#SSLCertificateFile[ \t]*/etc/letsencrypt/live/|SSLCertificateFile\t\t/etc/letsencrypt/live/|; \
-            s|#SSLCertificateKeyFile[ \t]*/etc/letsencrypt/live/|SSLCertificateKeyFile\t\t/etc/letsencrypt/live/|;" '/etc/apache2/sites-available/this-instance.conf'
-    ;;
-  amzn)
-    sed -i "s|[^#]SSLCertificateFile| #SSLCertificateFile|g; \
-            s|[^#]SSLCertificateKeyFile| #SSLCertificateKeyFile|g; \
-            s|#SSLCertificateFile[ \t]*/etc/letsencrypt/live/|SSLCertificateFile\t\t/etc/letsencrypt/live/|; \
-            s|#SSLCertificateKeyFile[ \t]*/etc/letsencrypt/live/|SSLCertificateKeyFile\t\t/etc/letsencrypt/live/|;" '/etc/httpd/conf.d/this-instance.conf'
-    ;;
-  esac
+  sed -i "s|[^#]SSLCertificateFile| #SSLCertificateFile|g; \
+          s|[^#]SSLCertificateKeyFile| #SSLCertificateKeyFile|g; \
+          s|#SSLCertificateFile[ \t]*/etc/letsencrypt/live/|SSLCertificateFile\t\t/etc/letsencrypt/live/|; \
+          s|#SSLCertificateKeyFile[ \t]*/etc/letsencrypt/live/|SSLCertificateKeyFile\t\t/etc/letsencrypt/live/|;" "${httpd_conf}/999-this-instance.conf"
   feedback h3 'Restart the web server'
   systemctl restart ${httpd_service}
+else
+  feedback error 'Failed to create the instances certificates, the web server will use the default (outdated) ones on EFS'
 fi
 
 # Link each of the vhosts listed in vhosts-httpd.conf to letsencrypt on this instance. So that all instances can renew all certificates as required
 feedback h3 'Setup the vhosts Lets Encrypt configs on this server'
 ${efs_mount_point}/script/update_instance-vhosts_pki.sh
+# Run Lets Encrypt Certbot to revoke and/or renew certiicates
+certbot renew --no-self-upgrade
+
 
 
 ### Server signature is over-sharing - no os, no sub versions e.g. just Apache/2
-#### Still issue where cakeit.nz is using the instances cert
+##### cakeit.nz is going to _default_ instead of its own vhost
+### PHP isn't working - wiki's not loading
 
 
 # Add a job to cron to run certbot regularly for renewals and revocations
@@ -944,11 +938,8 @@ cat <<***EOF*** > '/etc/cron.daily/certbot'
 #!/usr/bin/env bash
 
 # Update this instances configuration including what certificates need to be renewed
-feedback h3 'Link vhost PKI configs and renew certificates'
+echo 'Link vhost PKI configs and renew certificates'
 ${efs_mount_point}/script/update_instance-vhosts_pki.sh
-certbot renew --no-self-upgrade
-
-# Run Lets Encrypt Certbot to revoke and/or renew certiicates
 certbot renew --no-self-upgrade
 ***EOF***
 chmod 0770 '/etc/cron.daily/certbot'
