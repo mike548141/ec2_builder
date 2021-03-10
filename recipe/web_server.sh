@@ -801,7 +801,7 @@ systemctl -l status apache2
 systemctl restart php7.4-fpm
 systemctl -l status php7.4-fpm
 
-a2dismod fcgid
+a2enmod fcgid
 
 # Removed the install of package: libapache2-mod-php
 
