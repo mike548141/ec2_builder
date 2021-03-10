@@ -28,9 +28,9 @@ git pull
 
 cp ~/ec2_builder/recipe/web_server/mnt/efs/conf/vhost-httpd.conf '/mnt/efs/conf/vhost-httpd.conf'
 
-rm -rf /mnt/efs/script/*
-cp ~/ec2_builder/recipe/web_server/mnt/efs/script/* '/mnt/efs/script/'
-chmod -R 0770 /mnt/efs/script/*.sh
+rm --recursive --force /mnt/efs/script/*
+cp --recursive ~/ec2_builder/recipe/web_server/mnt/efs/script/* '/mnt/efs/script/'
+chmod --recursive 0770 /mnt/efs/script/*.sh
 
 cp ~/ec2_builder/recipe/web_server/mnt/efs/vhost/_default_/conf/instance-specific-httpd.conf '/mnt/efs/vhost/_default_/conf/instance-specific-httpd.conf'
 cp ~/ec2_builder/recipe/web_server/mnt/efs/vhost/_default_/conf/instance-specific-php-fpm.conf '/mnt/efs/vhost/_default_/conf/instance-specific-php-fpm.conf'
