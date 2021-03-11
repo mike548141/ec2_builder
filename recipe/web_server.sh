@@ -747,14 +747,14 @@ pkgmgr install 'nodejs npm'
 # PHP
 case ${hostos_id} in
 ubuntu)
-  pkgmgr install 'php-cli php-fpm php-common php-mysql php-apcu php-json php-bcmath php-gd php-intl php-mbstring php-xml php-pear'
+  pkgmgr install 'php-common php-cli php-fpm php-intl php-pear php-bcmath php-mbstring php-gd php-json php-xml php-mysql php-apcu'
   php_service='php7.4-fpm.service'
   php_conf='/etc/php/7.4/fpm/pool.d'
   mv "${php_conf}/www.conf" "${php_conf}/www.conf.disable"
   ;;
 amzn)
   manage_ale enable 'php7.3'
-  pkgmgr install 'php-cli php-fpm php-common php-pdo php-json php-mysqlnd php-bcmath php-gd php-intl php-mbstring php-xml php-pear php-pecl-apcu php-pecl-imagick php-pecl-libsodium php-pecl-zip'
+  pkgmgr install 'php-common php-cli php-fpm php-intl php-pear php-bcmath php-mbstring php-gd php-json php-xml php-mysqlnd php-pecl-apcu php-pdo php-pecl-imagick php-pecl-libsodium php-pecl-zip'
   php_service='php-fpm.service'
   php_conf='/etc/php-fpm.d'
   ;;
@@ -784,7 +784,6 @@ systemctl restart mariadb.service
 
 
 ##### Problem for HTTP/2: Module mpm_event disabled. Enabling module mpm_prefork. apache2_switch_mpm Switch to prefork
-
 #systemctl stop apache2
 #a2dismod php7.4
 #a2dismod mpm_prefork
@@ -792,16 +791,18 @@ systemctl restart mariadb.service
 #a2enconf php7.4-fpm
 #a2enmod proxy
 #a2enmod proxy_fcgi
-#systemctl restart apache2
-#systemctl -l status apache2
-#systemctl restart php7.4-fpm
-#systemctl -l status php7.4-fpm
 
-# Do I want this?
 #a2enmod fcgid
 
+#systemctl restart php7.4-fpm
+#systemctl -l status php7.4-fpm
+#systemctl restart apache2
+#systemctl -l status apache2
+
+
 # Removed the install of package: libapache2-mod-php
-# remove libapache2-mod-fcgid
+
+
 
 
 
@@ -809,17 +810,14 @@ systemctl restart mariadb.service
 feedback h1 'Install the web server'
 case ${hostos_id} in
 ubuntu)
-  pkgmgr install 'apache2 apache2-doc apache2-suexec-pristine'
+  pkgmgr install 'apache2 apache2-doc libapache2-mod-fcgid apache2-suexec-pristine'
   httpd_service='apache2.service'
   httpd_conf='/etc/apache2/sites-available'
   # Unwanted Apache defaults
   a2disconf apache2-doc
   a2dissite 000-default
   # Apache extension we need at the base
-  a2enmod ssl
-  a2enmod rewrite
-  a2enmod http2
-  a2enmod headers
+  a2enmod ssl rewrite http2 headers
   # PHP-FPM
   a2enmod proxy_fcgi setenvif
   a2enconf php7.4-fpm
