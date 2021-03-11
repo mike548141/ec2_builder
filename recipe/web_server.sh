@@ -813,6 +813,7 @@ ubuntu)
   pkgmgr install 'apache2 apache2-doc libapache2-mod-fcgid apache2-suexec-pristine'
   httpd_service='apache2.service'
   httpd_conf='/etc/apache2/sites-available'
+  feedback h3 'Apache config'
   # Unwanted Apache defaults
   a2disconf apache2-doc
   a2dissite 000-default
@@ -821,6 +822,7 @@ ubuntu)
   # PHP-FPM
   a2enmod proxy_fcgi setenvif
   a2enconf php7.4-fpm
+  systemctl restart ${php_service}
   # Setup the httpd conf for the default vhost specific to this vhosts name
   feedback h3 'Create a _default_ virtual host config on this instance'
   cp "${vhost_root}/_default_/conf/instance-specific-httpd.conf" "${httpd_conf}/999-this-instance.conf"
