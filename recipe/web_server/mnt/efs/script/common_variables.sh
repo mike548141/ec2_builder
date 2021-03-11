@@ -137,7 +137,7 @@ service_group=$(aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' 
 common_parameters="/${tenancy}/${resource_environment}/common"
 # Define the parameter store structure
 app_parameters="/${tenancy}/${resource_environment}/${service_group}"
-feedback body "Instance ${instance_id} is using AWS parameter store ${app_parameters} in the ${aws_region} region"
+feedback body "This instance (${instance_id}) is using AWS parameter store ${app_parameters} in the ${aws_region} region"
 
 # The domain name used by the servers for web hosting, this domain name represents the hosting provider and not its customers vhosts
 hosting_domain=$(aws ssm get-parameter --name "${app_parameters}/hosting_domain" --query 'Parameter.Value' --output text --region ${aws_region})

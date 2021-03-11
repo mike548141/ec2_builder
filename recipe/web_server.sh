@@ -797,6 +797,7 @@ systemctl restart mariadb.service
 #systemctl restart php7.4-fpm
 #systemctl -l status php7.4-fpm
 
+# Do I want this?
 #a2enmod fcgid
 
 # Removed the install of package: libapache2-mod-php
@@ -811,16 +812,17 @@ ubuntu)
   pkgmgr install 'apache2 apache2-doc apache2-suexec-pristine'
   httpd_service='apache2.service'
   httpd_conf='/etc/apache2/sites-available'
+  # Unwanted Apache defaults
   a2disconf apache2-doc
-  a2enconf javascript-common
+  a2dissite 000-default
+  # Apache extension we need at the base
+  a2enmod ssl
+  a2enmod rewrite
+  a2enmod http2
+  a2enmod headers
   # PHP-FPM
   a2enmod proxy_fcgi setenvif
   a2enconf php7.4-fpm
-  a2enmod headers
-  a2enmod http2
-  a2enmod rewrite
-  a2enmod ssl
-  a2dissite 000-default
   # Setup the httpd conf for the default vhost specific to this vhosts name
   feedback h3 'Create a _default_ virtual host config on this instance'
   cp "${vhost_root}/_default_/conf/instance-specific-httpd.conf" "${httpd_conf}/999-this-instance.conf"
