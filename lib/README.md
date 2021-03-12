@@ -1,0 +1,1 @@
+This folder is a library of code that enables the primary scripting used to deploy. Examples could be functions that handle user feedback and notifications from the script, or logging output of the script.

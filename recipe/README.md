@@ -1,0 +1,1 @@
+These recipes are the automation that combines infrastructure, software, configuration, and data to create a fully functional system.

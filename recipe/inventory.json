@@ -1,0 +1,8 @@
+{"inventory": {
+  "recipe": {
+    "name": "web_server",
+    "immutable_id": "af91",
+    "init_script": "web_server.sh",
+    "status": "beta"
+  }
+}}
