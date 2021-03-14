@@ -249,7 +249,7 @@ pkgmgr install 'awscli git jq'
 
 feedback h1 'Clone ec2_builder'
 mkdir --parents ~/builder/
-git clone "${ec2_builder_repo}" ~/builder/
+git clone ${ec2_builder_repo} ~/builder/
 exit_code=${?}
 if [ ${exit_code} -ne 0 ]
 then
