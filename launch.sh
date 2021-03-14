@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.3.1-20210307
+# Version:      0.3.2-20210314
 # File:         launch.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -25,6 +25,23 @@
 #======================================
 # Declare the libraries and functions
 #--------------------------------------
+aws_info () {
+  case {1} in
+  ec2_tag)
+    return $(aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == '${2}'].Value" --output text --region ${aws_region})
+    ;;
+  ssm)
+    return $(aws ssm get-parameter --name "${2}" --query 'Parameter.Value' --output text --region ${aws_region})
+    ;;
+  ssm_secure)
+    return $(aws ssm get-parameter --name "${2}" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption)
+    ;;
+  *)
+    feedback error "aws_info function does not handle ${1}"
+    ;;
+  esac
+}
+
 # Beautifies the feedback to std_out
 feedback () {
   case ${1} in
@@ -81,7 +98,7 @@ pkgmgr () {
     feedback h3 'Get updates from package repositories'
     case ${packmgr} in
     apt)
-      apt update
+      apt-get --assume-yes update
       local exit_code=${?}
       ;;
     yum)
@@ -94,7 +111,7 @@ pkgmgr () {
     feedback h3 'Upgrade installed packages'
     case ${packmgr} in
     apt)
-      apt --assume-yes upgrade
+      apt-get --assume-yes upgrade
       local exit_code=${?}
       ;;
     yum)
@@ -104,10 +121,12 @@ pkgmgr () {
     esac
     ;;
   install)
+    # Check if any of the packages are already installed
+    check_packages absent "${2}"
     feedback h3 "Install ${2}"
     case ${packmgr} in
     apt)
-      apt --assume-yes install ${2}
+      apt-get --assume-yes install ${2}
       local exit_code=${?}
       ;;
     yum)
@@ -115,6 +134,8 @@ pkgmgr () {
       local exit_code=${?}
       ;;
     esac
+    # Check that each of the packages are now showing as installed in the package database to verify it completed properly
+    check_packages present "${2}"
     ;;
   *)
     feedback error "The package manager function can not understand the command ${1}"
@@ -123,6 +144,41 @@ pkgmgr () {
   if [ ${exit_code} -ne 0 ]
   then
     feedback error "${packmgr} exit code ${exit_code}"
+  else
+    feedback body "Thumbs up, ${packmgr} exit code ${exit_code}"
+  fi
+}
+
+what_is_instance_meta () {
+  # AWS region and EC2 instance ID so we can use awscli
+  if [ -f '/usr/bin/ec2metadata' ]
+  then
+    aws_region=$(ec2metadata --availability-zone | cut -c 1-9)
+    instance_id=$(ec2metadata --instance-id)
+  elif [ -f '/usr/bin/ec2-metadata' ]
+  then
+    aws_region=$(ec2-metadata --availability-zone | cut -c 12-20)
+    instance_id=$(ec2-metadata --instance-id | cut -c 14-)
+  else
+    feedback error "Can't find ec2metadata or ec2-metadata"
+  fi
+  if [ -z "${aws_region}" ]
+  then
+    aws_region='us-east-1'
+    feedback error "AWS region not set, assuming ${aws_region}"
+  fi
+}
+
+what_is_package_manager () {
+  # Which package manger do we have to work with
+  if [ -f '/usr/bin/apt' ]
+  then
+    packmgr='apt'
+  elif [ -f '/usr/bin/yum' ]
+  then
+    packmgr='yum'
+  else
+    feedback error 'Package manager not found'
   fi
 }
 
@@ -140,38 +196,15 @@ feedback body "Started: $(date)"
 #======================================
 # Declare the constants
 #--------------------------------------
-# Which package manger do we have to work with
-if [ -f '/usr/bin/apt' ]
-then
-  packmgr='apt'
-elif [ -f '/usr/bin/yum' ]
-then
-  packmgr='yum'
-else
-  feedback error 'Package manager not found'
-fi
+what_is_package_manager
 
-# AWS region and EC2 instance ID so we can use awscli
-if [ -f '/usr/bin/ec2metadata' ]
-then
-  aws_region=$(ec2metadata --availability-zone | cut -c 1-9)
-  instance_id=$(ec2metadata --instance-id)
-elif [ -f '/usr/bin/ec2-metadata' ]
-then
-  aws_region=$(ec2-metadata --availability-zone | cut -c 12-20)
-  instance_id=$(ec2-metadata --instance-id | cut -c 14-)
-else
-  feedback error "Can't find ec2metadata or ec2-metadata"
-fi
-if [ -z "${aws_region}" ]
-then
-  aws_region='us-east-1'
-  feedback error "AWS region not set, assuming ${aws_region}"
-fi
+what_is_instance_meta
 
 #======================================
 # Declare the variables
 #--------------------------------------
+ec2_builder_repo=$(aws_info ec2_tag 'ec2_builder_repo')
+recipe=$(aws_info ec2_tag 'recipe')
 
 #======================================
 # Lets get into it
@@ -184,7 +217,6 @@ pkgmgr install 'awscli'
 pkgmgr install 'git'
 
 feedback h1 'Retrieve ec2_builder'
-ec2_builder_repo=$(aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == 'ec2_builder_repo'].Value" --output text --region ${aws_region})
 cd ~
 git clone ${ec2_builder_repo}
 exit_code=${?}
@@ -194,7 +226,17 @@ then
   exit 1
 fi
 
-recipe=$(aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == 'recipe'].Value" --output text --region ${aws_region})
 feedback h1 "Launch the ${recipe} recipe"
 chmod 0740 ~/ec2_builder/recipe/${recipe}.sh
 ~/ec2_builder/recipe/${recipe}.sh go
+
+
+
+#####
+install jq
+
+jq .inventory.recipe.immutable_id inventory.json
+ 
+jq '.immutable_id,.init_script'
+
+

@@ -62,8 +62,7 @@
 # Put my cool HTML5 website up on nova.net.nz again, latest version on the NAS?
 # I want to show what you can tell about a web visitor (device, past usage like browsing histroy and the person), how you can track their usage and geophysical. Like deviceinfo.me. With no tag it just shows a generic page, with tag (e.g. https://ushare.myspot.nz/share?showme=yes) it shows the end user what I can see. Some of the other pages in my Hack --> Track show better info that deviceinfo.me like which social media logins you are authenticated too https://browserleaks.com/social
 # --> Catch Facebook scammer pretending to be graeme dean
-# TerraForm
-# AWS Organisations. Owner, overwatch, web_prod, backup
+# TerraForm code to create all resources including the AWS Organisations. Owner, overwatch, web_prod, backup
 
 #======================================
 # Declare the arrays
@@ -72,7 +71,6 @@
 #======================================
 # Declare the libraries and functions
 #--------------------------------------
-
 
 
 ##### Apache & PHP slowing down host so much that 'apt list --installed *cgi*' takes minutes. Or is apt the problem?
@@ -543,6 +541,10 @@ aws_info () {
     ;;
   ssm_secure)
     return $(aws ssm get-parameter --name "${2}" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption)
+    ;;
+  *)
+    feedback error "aws_info function does not handle ${1}"
+    ;;
   esac
 }
 
@@ -916,12 +918,6 @@ what_is_instance_meta () {
     aws_region='us-east-1'
     feedback error "AWS region not set, assuming ${aws_region}"
   fi
-  feedback body "Instance ${instance_id} is in the ${aws_region} region"
-  
-  # What does the world around the instance look like
-  tenancy=$(aws_info ec2_tag 'tenancy')
-  resource_environment=$(aws_info ec2_tag 'resource_environment')
-  service_group=$(aws_info ec2_tag 'service_group')
 }
 
 what_is_package_manager () {
@@ -983,19 +979,23 @@ hostos_ver=$(grep '^VERSION_ID=' '/etc/os-release' | sed 's|"||g; s|^VERSION_ID=
 what_is_package_manager
 
 what_is_instance_meta
-# Define the parameter store structure based on the meta we just grabbed
-common_parameters="/${tenancy}/${resource_environment}/common"
-app_parameters="/${tenancy}/${resource_environment}/${service_group}"
 
 #======================================
 # Declare the variables
 #--------------------------------------
+tenancy=$(aws_info ec2_tag 'tenancy')
+resource_environment=$(aws_info ec2_tag 'resource_environment')
+service_group=$(aws_info ec2_tag 'service_group')
+# Define the parameter store structure based on the meta we just grabbed
+common_parameters="/${tenancy}/${resource_environment}/common"
+app_parameters="/${tenancy}/${resource_environment}/${service_group}"
+
 what_is_public_ip
 
 #======================================
 # Lets get into it
 #--------------------------------------
-feedback body "Using AWS parameter store ${app_parameters} in the ${aws_region} region"
+feedback body "Instance ${instance_id} is using AWS parameter store ${app_parameters} in the ${aws_region} region"
 
 app_fedora_epel
 
@@ -1030,9 +1030,9 @@ wget --tries=2 -O '/home/mike/.ssh/authorized_keys' 'https://cakeit.nz/identity/
 chmod 0600 '/home/mike/.ssh/authorized_keys'
 #### Received disconnect from 3.209.113.180 port 22:2: Too many authentication failures - PKI auth isn't working
 
-# Install the management agents. The AWS SSM agent is installed by default on AL2 AMI, and Ubuntu AMI as a snap package
-feedback h1 'System management agents'
-app_terraform
+feedback h1 'Systems management agent'
+feedback body 'AWS SSM agent is already installed by default in the AMI'
+pkgmgr install 'ansible'
 
 # Install security apps
 feedback h1 'Install security apps to protect the host'
