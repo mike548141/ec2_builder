@@ -50,7 +50,7 @@
 # Can I shrink the EBS volume, its 8 GB but using 2.3GB
 #
 # Need event based host management system to issue commands to instances, don't use cron as wasted CPU cycles, increased risk of faliure, more complex code base etc
-#   - Have HTTPD & PHP reload the config after changing a vhost e.g. systemctl restart httpd php-fpm
+#   - Have HTTPD & PHP reload the config after changing a vhost
 #   - add/delete users, groups, and group members as required. Ideally users & groups would be on a directory service
 # Ideally this would use IAM users to support MFA and a user ID that could tie to other services e.g. a S3 bucket dedicated to a IAM user
 # Swap from Let's Encrypt to AWS ACM for public certs. Removes the external dependency. Keep the Lets Encrypt code for future use
@@ -90,13 +90,12 @@ app_apache2 () {
     httpd_conf='/etc/apache2/sites-available'
     feedback h3 'Apache config'
     # Unwanted Apache defaults
-    a2disconf apache2-doc
+    a2disconf apache2-doc charset localized-error-pages other-vhosts-access-log security
     a2dissite 000-default
     # Apache extension we need at the base
     a2enmod ssl rewrite http2 headers
     # PHP-FPM
     a2enmod proxy_fcgi setenvif
-    a2enconf php7.4-fpm
     # Setup the httpd conf for the default vhost specific to this vhosts name
     feedback h3 'Create a _default_ virtual host config on this instance'
     cp "${vhost_root}/_default_/conf/instance-specific-httpd.conf" "${httpd_conf}/999-this-instance.conf"
@@ -155,9 +154,7 @@ app_apache2 () {
     ;;
   esac
   feedback h3 'Start the web server'
-  systemctl restart ${httpd_service}
-  feedback h3 'Web server status'
-  systemctl -l status ${httpd_service}
+  restart_service ${httpd_service}
 }
 
 app_fedora_epel () {
@@ -216,7 +213,7 @@ app_mariadb_server () {
   feedback body 'Set it to auto start at boot'
   systemctl enable mariadb.service
   feedback h3 'Start the database server'
-  systemctl restart mariadb.service
+  restart_service mariadb.service
 }
 
 app_ookla_speedtest_client () {
@@ -330,8 +327,10 @@ app_php () {
   # Create folder to php logs for the instance (not the vhosts)
   mkdir --parents '/var/log/php'
   feedback h3 'Restart PHP-FPM to recognise the additional PHP modules and config'
-  systemctl restart ${php_service}
-  systemctl -l status ${php_service}
+  restart_service ${php_service}
+  feedback h3 'Restart Apache HTTPD to enable PHP'
+  a2enconf php7.4-fpm
+  restart_service ${httpd_service}
 }
 
 app_rkhunter () {
@@ -467,8 +466,7 @@ app_sshd () {
   fi
   # We are done
   feedback h2 'Restart OpenSSH server'
-  systemctl restart sshd.service
-  systemctl -l status sshd.service
+  restart_service sshd.service
 }
 
 app_sudo () {
@@ -521,6 +519,7 @@ associate_eip () {
   else
     # Allocate the AWS EIP to this instance
     feedback h1 'Allocate the EIP public IP address to this instance'
+    ## Find out what instance is currently holding the EIP if any
     # Allocate the EIP
     aws ec2 associate-address --instance-id ${instance_id} --allocation-id ${eip_allocation_id} --region ${aws_region}
     # Update the public IP address assigned now the EIP is associated
@@ -674,7 +673,7 @@ create_pki_certificate () {
             s|#SSLCertificateFile[ \t]*/etc/letsencrypt/live/|SSLCertificateFile\t\t/etc/letsencrypt/live/|; \
             s|#SSLCertificateKeyFile[ \t]*/etc/letsencrypt/live/|SSLCertificateKeyFile\t\t/etc/letsencrypt/live/|;" "${httpd_conf}/999-this-instance.conf"
     feedback h3 'Restart the web server'
-    systemctl restart ${httpd_service}
+    restart_service ${httpd_service}
   else
     feedback error 'Failed to create the instances certificates, the web server will use the default (outdated) ones on EFS'
   fi
@@ -684,24 +683,30 @@ create_pki_certificate () {
   # Run Lets Encrypt Certbot to revoke and/or renew certiicates
   feedback h3 'Renew all certificates'
   certbot renew --no-self-upgrade
-  # Add a job to cron to run certbot regularly for renewals and revocations
-  feedback h3 'Add a job to cron to run certbot daily'
-	cat <<-***EOF*** > '/etc/cron.daily/certbot'
-		#!/usr/bin/env bash
-		# Update this instances configuration including what certificates need to be renewed
-		echo 'Link vhost PKI configs and renew certificates'
-		${efs_mount_point}/script/update_instance-vhosts_pki.sh
-		certbot renew --no-self-upgrade
-	***EOF***
-  chmod 0770 '/etc/cron.daily/certbot'
-  case ${hostos_id} in
-  ubuntu)
-    systemctl restart cron.service
-    ;;
-  amzn)
-    systemctl restart crond.service
-    ;;
-  esac
+##  # Add a job to cron to run certbot regularly for renewals and revocations
+#  feedback h3 'Add a job to cron to run certbot daily'
+#	cat <<-***EOF*** > '/etc/cron.daily/certbot'
+#		#!/usr/bin/env bash
+#		# Update this instances configuration including what certificates need to be renewed
+#		echo 'Link vhost PKI configs and renew certificates'
+#		${efs_mount_point}/script/update_instance-vhosts_pki.sh
+#		certbot renew --no-self-upgrade
+#	***EOF***
+#  chmod 0770 '/etc/cron.daily/certbot'
+#  case ${hostos_id} in
+#  ubuntu)
+#    restart_service cron.service
+#    ;;
+#  amzn)
+#    restart_service crond.service
+#    ;;
+#  esac
+}
+
+disable_service () {
+  systemctl disable ${1}
+  systemctl stop ${1}
+  systemctl -l status ${1}
 }
 
 # Beautifies the feedback to std_out
@@ -789,6 +794,7 @@ mount_efs_volume () {
 mount_s3_bucket () {
   # Install Fuse S3FS and mount the S3 bucket for web server data - https://github.com/s3fs-fuse/s3fs-fuse
   feedback h1 'Fuse S3FS'
+  ## The S3 function should run configure_awscli since its dependent upon it
   case ${hostos_id} in
   ubuntu)
     pkgmgr install 's3fs'
@@ -898,6 +904,11 @@ manage_ale () {
     yum clean metadata
     ;;
   esac
+}
+
+restart_service () {
+  systemctl restart ${1}
+  systemctl -l status ${1}
 }
 
 what_is_instance_meta () {
@@ -1050,7 +1061,7 @@ feedback h1 'Useful tools for Linux'
 feedback h2 'AWS EC2 tools'
 pkgmgr install 'ec2-ami-tools'
 feedback h2 'Whole host use/performance'
-pkgmgr install 'stacer sysstat nmon glances strace'
+pkgmgr install 'stacer sysstat nmon strace'
 feedback h2 'CPU use/performance'
 feedback h2 'Memory use/performance'
 feedback h2 'Disk use/performance'
@@ -1065,7 +1076,7 @@ app_mariadb_client
 
 mount_efs_volume
 # Import the common constants and variables held in a script on the EFS volume. This saves duplicating code between scripts
-feedback h1 'Import the common variables from EFS'
+feedback h2 'Import the common variables from EFS'
 source "${efs_mount_point}/script/common_variables.sh"
 
 # Create users and groups for the vhosts on EFS
@@ -1097,7 +1108,6 @@ done
 
 configure_awscli
 
-## The S3 function should run configure_awscli since its dependent upon it
 mount_s3_bucket
 
 app_apache2
@@ -1125,6 +1135,10 @@ create_dns_record
 create_pki_certificate
 
 app_ookla_speedtest_server
+
+# Disable services we don't need
+disable_service iscsid.socket
+disable_service postfix.service
 
 # Grab warnings and errors to review
 grep -i 'error' '/var/log/cloud-init-output.log' | sort | uniq >> ~/for_review.log
