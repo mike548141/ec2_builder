@@ -211,32 +211,24 @@ recipe=$(aws_info ec2_tag 'recipe')
 #--------------------------------------
 feedback body "Instance ${instance_id} is in the ${aws_region} region"
 
-feedback h1 'Add pre-reqs'
+feedback h1 'Updating and adding prerequisites'
 pkgmgr update
-pkgmgr install 'awscli'
-pkgmgr install 'git'
+pkgmgr install 'awscli git jq'
 
-feedback h1 'Retrieve ec2_builder'
-cd ~
-git clone ${ec2_builder_repo}
+feedback h1 'Clone ec2_builder'
+mkdir --parents ~/builder/
+git clone ${ec2_builder_repo} ~/builder/
 exit_code=${?}
 if [ ${exit_code} -ne 0 ]
 then
-  feedback error "Git error ${exit_code} pulling ${ec2_builder_repo}"
+  feedback error "Git error ${exit_code} cloning ${ec2_builder_repo}"
   exit 1
 fi
+
+##
+jq ".inventory.recipes.web_server.init_script" ~/builder/inventory.json
+
 
 feedback h1 "Launch the ${recipe} recipe"
 chmod 0740 ~/ec2_builder/recipe/${recipe}.sh
 ~/ec2_builder/recipe/${recipe}.sh go
-
-
-
-#####
-install jq
-
-jq .inventory.recipe.immutable_id inventory.json
- 
-jq '.immutable_id,.init_script'
-
-

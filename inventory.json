@@ -1,12 +1,15 @@
 {
   "inventory": {
+    "data": {
+    }
     "recipes": {
       "web_server": {
-        "Description": "cakeIT LAMP server for web hosting",
+        "id.immutable": "af91",
         "version": "1.0",
-        "immutable_id": "af91",
-        "init_script": "web_server.sh",
-        "status": [ "active", "beta" ]
+        "type": "complex",
+        "Description.en": "cakeIT LAMP server for web hosting",
+        "init_script": "recipe/af91/web_server.sh",
+        "status.en": [ "active", "development" ]
       }
     }
   }
