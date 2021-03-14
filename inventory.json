@@ -1,6 +1,13 @@
 {
   "inventory": {
-    "data": {
+    "data_set": {
+      "web_server": {
+        "id.immutable": "t1e3",
+        "version": "1.0",
+        "type": "system_data",
+        "Description.en": "Web server config files",
+        "status.en": [ "active", "development" ]
+      }
     }
     "recipes": {
       "web_server": {
