@@ -8,7 +8,7 @@
         "Description.en": "Web server config files",
         "status.en": [ "active", "development" ]
       }
-    }
+    },
     "recipes": {
       "web_server": {
         "id.immutable": "af91",

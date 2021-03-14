@@ -225,10 +225,7 @@ then
   exit 1
 fi
 
-##
-jq ".inventory.recipes.web_server.init_script" ~/builder/inventory.json
-
-
 feedback h1 "Launch the ${recipe} recipe"
-chmod 0740 ~/ec2_builder/recipe/${recipe}.sh
-~/ec2_builder/recipe/${recipe}.sh go
+next_script=$(jq ".inventory.recipes.${recipe}.init_script" ~/builder/inventory.json)
+chmod 0740 ~/builder/${next_script}
+~/builder/${next_script} go
