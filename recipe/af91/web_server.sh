@@ -951,7 +951,7 @@ what_is_public_ip () {
 #======================================
 # Say hello
 #--------------------------------------
-if [ "${1}" == "go" ]
+if [ "${1}" == "launch" ]
 then
   feedback title 'ec2_builder build script'
   script_ver=$(grep '^# Version:[ \t]*' ${0} | sed 's|# Version:[ \t]*||')
@@ -965,7 +965,7 @@ then
 else
   feedback error 'Exiting because you did not use the special word'
   feedback body 'This is to protect against running this script unintentionally, it could cause damage to the host'
-  feedback body "Run '${0} go' to execute the script"
+  feedback body "Run '${0} launch' to execute the script"
   exit 1
 fi
 

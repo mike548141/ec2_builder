@@ -235,8 +235,6 @@ what_is_instance_meta
 #======================================
 # Declare the variables
 #--------------------------------------
-ec2_builder_repo=$(aws_info ec2_tag 'ec2_builder_repo')
-recipe=$(aws_info ec2_tag 'recipe')
 
 #======================================
 # Lets get into it
@@ -247,7 +245,10 @@ feedback h1 'Updating and adding prerequisites'
 pkgmgr update
 pkgmgr install 'awscli git jq'
 
-feedback h1 'Clone ec2_builder'
+ec2_builder_repo=$(aws_info ec2_tag 'ec2_builder_repo')
+recipe=$(aws_info ec2_tag 'recipe')
+
+feedback h1 'Clone the build scripts'
 mkdir --parents ~/builder/
 git clone ${ec2_builder_repo} ~/builder/
 exit_code=${?}
@@ -257,7 +258,7 @@ then
   exit 1
 fi
 
-feedback h1 "Launch the ${recipe} recipe"
-next_script=$(jq ".inventory.recipes.${recipe}.init_script" ~/builder/inventory.json)
+feedback h1 "Start the ${recipe} recipe"
+next_script=$(jq --raw-output ".inventory.recipes.${recipe}.init_script" ~/builder/inventory.json)
 chmod 0740 ~/builder/${next_script}
-~/builder/${next_script} go
+~/builder/${next_script} launch
