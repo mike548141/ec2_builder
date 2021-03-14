@@ -534,13 +534,13 @@ associate_eip () {
 aws_info () {
   case ${1} in
   ec2_tag)
-    return $(aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == '${2}'].Value" --output text --region ${aws_region})
+    echo $(aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == '${2}'].Value" --output text --region ${aws_region})
     ;;
   ssm)
-    return $(aws ssm get-parameter --name "${2}" --query 'Parameter.Value' --output text --region ${aws_region})
+    echo $(aws ssm get-parameter --name "${2}" --query 'Parameter.Value' --output text --region ${aws_region})
     ;;
   ssm_secure)
-    return $(aws ssm get-parameter --name "${2}" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption)
+    echo $(aws ssm get-parameter --name "${2}" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption)
     ;;
   *)
     feedback error "Function aws_info does not handle ${1}"
