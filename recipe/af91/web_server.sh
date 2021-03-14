@@ -73,7 +73,6 @@
 # Declare the libraries and functions
 #--------------------------------------
 
-###### Fix the EOF's so the function can be tabbed out
 
 
 ##### Apache & PHP slowing down host so much that 'apt list --installed *cgi*' takes minutes. Or is apt the problem?
@@ -228,7 +227,9 @@ app_ookla_speedtest_client () {
   case ${packmgr} in
   apt)
     apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 379CE192D401AB61
-    echo "deb https://ookla.bintray.com/debian generic main" | tee '/etc/apt/sources.list.d/speedtest.list'
+		cat <<-***EOF*** > '/etc/apt/sources.list.d/speedtest.list'
+			deb https://ookla.bintray.com/debian generic main
+		***EOF***
     ;;
   yum)
     cd ~
@@ -264,22 +265,22 @@ app_ookla_speedtest_server () {
 		logging.loggers.app.level = information
 	***EOF***
   # Configure a daemon for systemd
-cat <<***EOF*** > '/opt/ookla/server/ookla-server.service'
-[Unit]
-Description=ookla-server
-After=network-online.target
+	cat <<-***EOF*** > '/opt/ookla/server/ookla-server.service'
+		[Unit]
+		Description=ookla-server
+		After=network-online.target
 
-[Service]
-Type=simple
-WorkingDirectory=/opt/ookla/server/
-ExecStart=/opt/ookla/server/OoklaServer
-KillMode=process
-Restart=on-failure
-RestartSec=15min
+		[Service]
+		Type=simple
+		WorkingDirectory=/opt/ookla/server/
+		ExecStart=/opt/ookla/server/OoklaServer
+		KillMode=process
+		Restart=on-failure
+		RestartSec=15min
 
-[Install]
-WantedBy=multi-user.target
-***EOF***
+		[Install]
+		WantedBy=multi-user.target
+	***EOF***
   ln -s '/opt/ookla/server/ookla-server.service' '/etc/systemd/system/ookla-server.service'
   systemctl daemon-reload
 }
@@ -324,8 +325,10 @@ app_php () {
   sed -i "s|i-.*\.cakeit\.nz|${instance_id}.${hosting_domain}|g" "${php_conf}/999-this-instance.conf"
   # Include the vhost config on the EFS volume
   feedback h3 'Include the vhost config on the EFS volume'
-  echo '; Include the vhosts stored on the EFS volume' > "${php_conf}/100-vhost.conf"
-  echo "include=${efs_mount_point}/conf/*.php-fpm.conf" >> "${php_conf}/100-vhost.conf"
+	cat <<-***EOF*** > "${php_conf}/100-vhost.conf"
+		; Include the vhosts stored on the EFS volume
+		include=${efs_mount_point}/conf/*.php-fpm.conf
+	***EOF***
   # Create folder to php logs for the instance (not the vhosts)
   mkdir --parents '/var/log/php'
   feedback h3 'Restart PHP-FPM to recognise the additional PHP modules and config'
@@ -367,76 +370,78 @@ app_sshd () {
   then
     # Ubuntu has this by default, AL2's version of openssh-server (7.4p1-21.amzn2.0.1) does not support it
     feedback error 'Hardening ineffective. SSHD child config added to /etc/ssh/sshd_config but commented out. Please uncomment and restart the service to complete the hardening of SSHD'
-    echo '#Include /etc/ssh/sshd_config.d/*.conf' >> '/etc/ssh/sshd_config'
+		cat <<-***EOF*** >> '/etc/ssh/sshd_config'
+			#Include /etc/ssh/sshd_config.d/*.conf
+		***EOF***
   fi
   # Use the cipher tech that we trust, tested against https://www.sshaudit.com/
   feedback h3 'Adding the child SSHD configs to harden the server'
   feedback body 'Host keys'
-cat <<***EOF*** > '/etc/ssh/sshd_config.d/host_key.conf'
-# SSHD host keys
-HostKey /etc/ssh/ssh_host_ed25519_key
-HostKey /etc/ssh/ssh_host_rsa_key
-***EOF***
+	cat <<-***EOF*** > '/etc/ssh/sshd_config.d/host_key.conf'
+		# SSHD host keys
+		HostKey /etc/ssh/ssh_host_ed25519_key
+		HostKey /etc/ssh/ssh_host_rsa_key
+	***EOF***
   feedback body 'Host key exchange algorithms'
-cat <<***EOF*** > '/etc/ssh/sshd_config.d/host_key_exchange.conf'
-# Allowed host key exchange algorithms
-HostKeyAlgorithms ssh-ed25519,rsa-sha2-512,rsa-sha2-256
-#HostKeyAlgorithms ssh-ed25519,ssh-ed25519-cert-v01@openssh.com,sk-ssh-ed25519@openssh.com,sk-ssh-ed25519-cert-v01@openssh.com,rsa-sha2-256,rsa-sha2-512,rsa-sha2-256-cert-v01@openssh.com,rsa-sha2-512-cert-v01@openssh.com
-***EOF***
+	cat <<-***EOF*** > '/etc/ssh/sshd_config.d/host_key_exchange.conf'
+		# Allowed host key exchange algorithms
+		HostKeyAlgorithms ssh-ed25519,rsa-sha2-512,rsa-sha2-256
+		#HostKeyAlgorithms ssh-ed25519,ssh-ed25519-cert-v01@openssh.com,sk-ssh-ed25519@openssh.com,sk-ssh-ed25519-cert-v01@openssh.com,rsa-sha2-256,rsa-sha2-512,rsa-sha2-256-cert-v01@openssh.com,rsa-sha2-512-cert-v01@openssh.com
+	***EOF***
   feedback body 'Key exchange algorithms'
-cat <<***EOF*** > '/etc/ssh/sshd_config.d/key_exchange.conf'
-# Allowed key exchange algorithms
-KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group18-sha512,diffie-hellman-group16-sha512,diffie-hellman-group-exchange-sha256
-***EOF***
+	cat <<-***EOF*** > '/etc/ssh/sshd_config.d/key_exchange.conf'
+		# Allowed key exchange algorithms
+		KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group18-sha512,diffie-hellman-group16-sha512,diffie-hellman-group-exchange-sha256
+	***EOF***
   feedback body 'Ciphers'
-cat <<***EOF*** > '/etc/ssh/sshd_config.d/cipher.conf'
-# Allowed encryption algorithms (aka ciphers)
-Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr
-***EOF***
+	cat <<-***EOF*** > '/etc/ssh/sshd_config.d/cipher.conf'
+		# Allowed encryption algorithms (aka ciphers)
+		Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr
+	***EOF***
   feedback body 'Message Authentication Code (MAC) algorithms'
-cat <<***EOF*** > '/etc/ssh/sshd_config.d/mac.conf'
-# Allowed Message Authentication Code (MAC) algorithms
-MACs hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com,umac-128-etm@openssh.com
-***EOF***
+	cat <<-***EOF*** > '/etc/ssh/sshd_config.d/mac.conf'
+		# Allowed Message Authentication Code (MAC) algorithms
+		MACs hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com,umac-128-etm@openssh.com
+	***EOF***
   feedback body 'SSH protocol'
-cat <<***EOF*** > '/etc/ssh/sshd_config.d/protocol.conf'
-# Allowed SSH protocols
-Protocol 2
-***EOF***
+	cat <<-***EOF*** > '/etc/ssh/sshd_config.d/protocol.conf'
+		# Allowed SSH protocols
+		Protocol 2
+	***EOF***
   feedback body 'SSHD authentication config'
-cat <<***EOF*** > '/etc/ssh/sshd_config.d/authentication.conf'
-# Authentication related config
-PubkeyAuthentication yes
-AuthenticationMethods publickey
-LoginGraceTime 1m
-PermitRootLogin no
-StrictModes yes
-MaxAuthTries 2
-PasswordAuthentication no
-PermitEmptyPasswords no
-Banner /etc/ssh/sshd_banner
-AllowGroups ssh
-***EOF***
+	cat <<-***EOF*** > '/etc/ssh/sshd_config.d/authentication.conf'
+		# Authentication related config
+		PubkeyAuthentication yes
+		AuthenticationMethods publickey
+		LoginGraceTime 1m
+		PermitRootLogin no
+		StrictModes yes
+		MaxAuthTries 2
+		PasswordAuthentication no
+		PermitEmptyPasswords no
+		Banner /etc/ssh/sshd_banner
+		AllowGroups ssh
+	***EOF***
   feedback body 'SSHD session config'
-cat <<***EOF*** > '/etc/ssh/sshd_config.d/session.conf'
-# SSH session related config
-ClientAliveInterval 15
-ClientAliveCountMax 40
-MaxSessions 10
-PrintLastLog yes
-***EOF***
+	cat <<-***EOF*** > '/etc/ssh/sshd_config.d/session.conf'
+		# SSH session related config
+		ClientAliveInterval 15
+		ClientAliveCountMax 40
+		MaxSessions 10
+		PrintLastLog yes
+	***EOF***
   # Create a welcome banner
   feedback body 'SSHD welcome banner'
-cat <<***EOF*** > '/etc/ssh/sshd_banner'
+	cat <<-***EOF*** > '/etc/ssh/sshd_banner'
 
-************************************************************************************************************************************************
-*                                                                                                                                              *
-* Use of this system is monitored and logged, unauthorised access is prohibited and is subject to criminal and civil penalties.                *
-* By proceeding you consent to interception, auditing, and the interrogation of your devices, traffic and information for evidence of mis-use. *
-*                                                                                                                                              *
-************************************************************************************************************************************************
+		************************************************************************************************************************************************
+		*                                                                                                                                              *
+		* Use of this system is monitored and logged, unauthorised access is prohibited and is subject to criminal and civil penalties.                *
+		* By proceeding you consent to interception, auditing, and the interrogation of your devices, traffic and information for evidence of mis-use. *
+		*                                                                                                                                              *
+		************************************************************************************************************************************************
 
-***EOF***
+	***EOF***
   feedback h3 'Granting the default EC2 user SSH access'
   case ${hostos_id} in
   ubuntu)
@@ -479,9 +484,11 @@ app_sudo () {
   if [ -z "$(grep '^%sudo.*ALL=(ALL:ALL) ALL' '/etc/sudoers')" ]
   then
     feedback body 'Give the sudo group permissions'
-    echo '# Allow members of group sudo to execute any command' > '/etc/sudoers.d/group-sudo'
-    echo '%sudo   ALL=(ALL:ALL) ALL' >> '/etc/sudoers.d/group-sudo'
-  fi
+		cat <<-***EOF*** > '/etc/sudoers.d/group-sudo'
+			# Allow members of group sudo to execute any command
+			%sudo   ALL=(ALL:ALL) ALL
+		***EOF***
+	fi
 }
 
 app_terraform () {
@@ -677,14 +684,13 @@ create_pki_certificate () {
   certbot renew --no-self-upgrade
   # Add a job to cron to run certbot regularly for renewals and revocations
   feedback h3 'Add a job to cron to run certbot daily'
-cat <<***EOF*** > '/etc/cron.daily/certbot'
-#!/usr/bin/env bash
-
-# Update this instances configuration including what certificates need to be renewed
-echo 'Link vhost PKI configs and renew certificates'
-${efs_mount_point}/script/update_instance-vhosts_pki.sh
-certbot renew --no-self-upgrade
-***EOF***
+	cat <<-***EOF*** > '/etc/cron.daily/certbot'
+		#!/usr/bin/env bash
+		# Update this instances configuration including what certificates need to be renewed
+		echo 'Link vhost PKI configs and renew certificates'
+		${efs_mount_point}/script/update_instance-vhosts_pki.sh
+		certbot renew --no-self-upgrade
+	***EOF***
   chmod 0770 '/etc/cron.daily/certbot'
   case ${hostos_id} in
   ubuntu)
@@ -772,11 +778,13 @@ mount_efs_volume () {
   fi
   mount -t efs -o tls ${efs_volume}:/ ${efs_mount_point}
   feedback body 'Set it to auto mount at boot'
-cat <<***EOF*** >> '/etc/fstab'
-# Mount AWS EFS volume ${efs_volume} for the web root data
-${efs_volume}:/ ${efs_mount_point} efs tls,_netdev 0 0
-***EOF***
+	cat <<-***EOF*** >> '/etc/fstab'
+		# Mount AWS EFS volume ${efs_volume} for the web root data
+		${efs_volume}:/ ${efs_mount_point} efs tls,_netdev 0 0
+	***EOF***
 }
+
+#### replace echo's with cat heredoc
 
 mount_s3_bucket () {
   # Install Fuse S3FS and mount the S3 bucket for web server data - https://github.com/s3fs-fuse/s3fs-fuse
@@ -800,10 +808,10 @@ mount_s3_bucket () {
   fi
   s3fs ${s3_bucket} ${s3_mount_point} -o allow_other -o use_path_request_style
   feedback body 'Set it to auto mount at boot'
-cat <<***EOF*** >> '/etc/fstab'
-# Mount AWS S3 bucket ${s3_bucket} for static web data
-s3fs#${s3_bucket} ${s3_mount_point} fuse _netdev,allow_other,use_path_request_style 0 0
-***EOF***
+	cat <<-***EOF*** >> '/etc/fstab'
+		# Mount AWS S3 bucket ${s3_bucket} for static web data
+		s3fs#${s3_bucket} ${s3_mount_point} fuse _netdev,allow_other,use_path_request_style 0 0
+	***EOF***
 }
 
 pam_google_mfa () {
