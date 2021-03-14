@@ -567,12 +567,12 @@ check_packages () {
     # Check if the package is listed in the package manger database
     if [ -z "$(apt list --installed ${one_clean_pkg} | grep -v '^Listing')" ]
     then
-      if [ "${1]" == "present" ]
+      if [ "${1}" == "present" ]
       then
         feedback error "The package ${one_clean_pkg} has not installed properly"
       fi
     else
-      if [ "${1]" == "absent" ]
+      if [ "${1}" == "absent" ]
       then
         feedback error "The package ${one_clean_pkg} is already installed"
       fi
