@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.64-20210312
+# Version:      0.7.70-20210314
 # File:         web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -783,8 +783,6 @@ mount_efs_volume () {
 		${efs_volume}:/ ${efs_mount_point} efs tls,_netdev 0 0
 	***EOF***
 }
-
-#### replace echo's with cat heredoc
 
 mount_s3_bucket () {
   # Install Fuse S3FS and mount the S3 bucket for web server data - https://github.com/s3fs-fuse/s3fs-fuse
