@@ -42,6 +42,38 @@ aws_info () {
   esac
 }
 
+check_packages () {
+  # Handle a list of multiple packages by looping through them
+  for one_pkg in ${2}
+  do
+    # Lookup the package name if given a file name
+    if [ $(echo ${one_pkg} | grep -i '\.deb$') ]
+    then
+      local one_clean_pkg=$(dpkg --info ${one_pkg} | grep ' Package: ' | sed 's|^ Package: ||;')
+    elif [ $(echo ${one_pkg} | grep -i '\.rpm$') ]
+    then
+      ## Add support for rpm packages
+      local one_clean_pkg='oops TBC'
+    else
+      local one_clean_pkg=${one_pkg}
+    fi
+    
+    # Check if the package is listed in the package manger database
+    if [ -z "$(apt list --installed ${one_clean_pkg} | grep -v '^Listing')" ]
+    then
+      if [ "${1]" == "present" ]
+      then
+        feedback error "The package ${one_clean_pkg} has not installed properly"
+      fi
+    else
+      if [ "${1]" == "absent" ]
+      then
+        feedback error "The package ${one_clean_pkg} is already installed"
+      fi
+    fi
+  done
+}
+
 # Beautifies the feedback to std_out
 feedback () {
   case ${1} in
@@ -217,7 +249,7 @@ pkgmgr install 'awscli git jq'
 
 feedback h1 'Clone ec2_builder'
 mkdir --parents ~/builder/
-git clone ${ec2_builder_repo} ~/builder/
+git clone "${ec2_builder_repo}" ~/builder/
 exit_code=${?}
 if [ ${exit_code} -ne 0 ]
 then
