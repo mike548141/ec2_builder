@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.70-20210314
+# Version:      0.7.71-20210314
 # File:         web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -173,6 +173,7 @@ app_lsa () {
 
 app_lsm () {
   # Linux security module
+  ## add a reboot to enable apparmor?
   case ${hostos_id} in
   ubuntu)
     pkgmgr install 'apparmor apparmor-utils apparmor-profiles apparmor-profiles-extra'
@@ -1008,11 +1009,10 @@ feedback h1 'Create the user mike'
 useradd --shell '/bin/bash' --create-home -c 'Mike Clements' --groups ssh,sudo 'mike'
 feedback h3 'Add SSH key'
 mkdir --parents '/home/mike/.ssh'
-chown mike:mike '/home/mike/.ssh'
 chmod 0700 '/home/mike/.ssh'
 wget --tries=2 -O '/home/mike/.ssh/authorized_keys' 'https://cakeit.nz/identity/mike.clements/mike-ssh.pub'
 chmod 0600 '/home/mike/.ssh/authorized_keys'
-#### Received disconnect from 3.209.113.180 port 22:2: Too many authentication failures - PKI auth isn't working
+chown -R mike:mike '/home/mike/.ssh'
 
 feedback h1 'Systems management agent'
 feedback body 'AWS SSM agent is already installed by default in the AMI'
@@ -1120,5 +1120,4 @@ grep -i 'warn' '/var/log/cloud-init-output.log' | sort | uniq >> ~/for_review.lo
 
 # Thats all I wrote
 feedback title "Build script finished - https://${instance_id}.${hosting_domain}/wiki/"
-### add a reboot to enable apparmor?
 exit 0
