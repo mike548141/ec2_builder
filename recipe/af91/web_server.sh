@@ -71,15 +71,6 @@
 #======================================
 # Declare the libraries and functions
 #--------------------------------------
-
-
-##### Apache & PHP slowing down host so much that 'apt list --installed *cgi*' takes minutes. Or is apt the problem?
-#a2enmod actions fcgid alias proxy_fcgi
-#<FilesMatch \.php$>
-#  SetHandler "proxy:unix:/var/run/php/php7.4-fpm.sock|fcgi://localhost"
-#</FilesMatch>
-
-
 app_apache2 () {
   # Install the web server
   feedback h1 'Install the web server'
@@ -93,9 +84,9 @@ app_apache2 () {
     a2disconf apache2-doc charset localized-error-pages other-vhosts-access-log security
     a2dissite 000-default
     # Apache extension we need at the base
-    a2enmod ssl rewrite http2 headers
+    a2enmod headers http2 rewrite ssl
     # PHP-FPM
-    a2enmod proxy_fcgi setenvif
+    a2enmod actions alias proxy_fcgi setenvif
     # Setup the httpd conf for the default vhost specific to this vhosts name
     feedback h3 'Create a _default_ virtual host config on this instance'
     cp "${vhost_root}/_default_/conf/instance-specific-httpd.conf" "${httpd_conf}/999-this-instance.conf"
@@ -683,24 +674,6 @@ create_pki_certificate () {
   # Run Lets Encrypt Certbot to revoke and/or renew certiicates
   feedback h3 'Renew all certificates'
   certbot renew --no-self-upgrade
-##  # Add a job to cron to run certbot regularly for renewals and revocations
-#  feedback h3 'Add a job to cron to run certbot daily'
-#	cat <<-***EOF*** > '/etc/cron.daily/certbot'
-#		#!/usr/bin/env bash
-#		# Update this instances configuration including what certificates need to be renewed
-#		echo 'Link vhost PKI configs and renew certificates'
-#		${efs_mount_point}/script/update_instance-vhosts_pki.sh
-#		certbot renew --no-self-upgrade
-#	***EOF***
-#  chmod 0770 '/etc/cron.daily/certbot'
-#  case ${hostos_id} in
-#  ubuntu)
-#    restart_service cron.service
-#    ;;
-#  amzn)
-#    restart_service crond.service
-#    ;;
-#  esac
 }
 
 disable_service () {
@@ -1137,8 +1110,9 @@ create_pki_certificate
 app_ookla_speedtest_server
 
 # Disable services we don't need
-disable_service iscsid.socket
-disable_service postfix.service
+disable_service iscsi.service
+disable_service iscsid.service
+disable_service open-iscsi.service
 
 # Grab warnings and errors to review
 grep -i 'error' '/var/log/cloud-init-output.log' | sort | uniq >> ~/for_review.log
