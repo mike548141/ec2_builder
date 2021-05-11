@@ -405,7 +405,7 @@ app_sshd () {
 		LoginGraceTime 1m
 		PermitRootLogin no
 		StrictModes yes
-		MaxAuthTries 2
+		MaxAuthTries 8
 		PasswordAuthentication no
 		PermitEmptyPasswords no
 		Banner /etc/ssh/sshd_banner
