@@ -105,12 +105,12 @@ check_packages () {
     fi
     
     # Check if the package is listed in the package manger database
-    local pkg_status=$(dpkg-query --showformat='${db:Status-Abbrev}' --show ${pkg_name})
-    if [ "${1}" == "present" ] && [ ${pkg_status} != 'ii' ]
+    local pkg_status=$(dpkg-query --showformat='${Status}' --show ${pkg_name})
+    if [ "${1}" == "present" ] && [ ${pkg_status} != 'install ok installed' ]
     then
       # Not installed i.e. not listed in the package manger database
       feedback error "The package ${pkg_name} has not installed properly (${pkg_status})"
-    elif [ "${1}" == "absent" ] && [ ${pkg_status} == 'ii' ]
+    elif [ "${1}" == "absent" ] && [ ${pkg_status} == 'install ok installed' ]
     then
       feedback error "The package ${pkg_name} is already installed (${pkg_status})"
     fi
