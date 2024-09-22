@@ -284,6 +284,9 @@ feedback h1 'Updating and adding prerequisites'
 pkgmgr update
 pkgmgr install 'awscli git jq'
 
+## Could swapping to snap be done by pkgmgr instead if package is not in apt
+snap install aws-cli --classic
+
 ec2_builder_repo=$(aws_info ec2_tag 'ec2_builder_repo')
 recipe=$(aws_info ec2_tag 'recipe')
 
