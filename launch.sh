@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.4.0 2024-09-22T23:16
+# Version:      0.4.1 2024-09-23T01:21
 # File:         launch.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -57,6 +57,7 @@ instance_id=$(ec2metadata --instance-id)
 # Lets get into it
 #--------------------------------------
 echo "--> Instance ${instance_id} is in the ${aws_region} region"
+echo ''
 snap install aws-cli --classic
 
 ec2_builder_repo=$(aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == 'ec2_builder_repo'].Value" --output text --region "${aws_region}")

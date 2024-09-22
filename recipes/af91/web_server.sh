@@ -144,7 +144,8 @@ pkgmgr install 'iotop'
 feedback h2 'Network configuration'
 pkgmgr install 'ethtool'
 feedback h2 'Network use/performance'
-pkgmgr install 'iptraf-ng nethogs iftop bmon iperf3'
+pkgmgr install 'iptraf-ng nethogs iftop bmon'
+## iperf3
 app_ookla_speedtest_client
 feedback h2 'Database client'
 app_mariadb_client

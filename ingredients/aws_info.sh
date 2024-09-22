@@ -31,7 +31,7 @@ aws_info () {
       echo $(aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == '${2}'].Value" --output text --region "${aws_region}")
     ;;
     ec2_tags)
-      echo $(aws ec2 describe-tags --output text --region "${aws_region}")
+      echo $(aws ec2 describe-tags --output table --region "${aws_region}")
     ;;
     ssm)
       echo $(aws ssm get-parameter --name "${2}" --query 'Parameter.Value' --output text --region "${aws_region}")
