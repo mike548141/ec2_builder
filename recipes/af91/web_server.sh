@@ -75,16 +75,16 @@ aws_info () {
   case ${1} in
     ec2_tag)
       echo $(aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == '${2}'].Value" --output text --region "${aws_region}")
-      ;;
+    ;;
     ssm)
       echo $(aws ssm get-parameter --name "${2}" --query 'Parameter.Value' --output text --region "${aws_region}")
-      ;;
+    ;;
     ssm_secure)
       echo $(aws ssm get-parameter --name "${2}" --query 'Parameter.Value' --output text --region "${aws_region}" --with-decryption)
-      ;;
+    ;;
     *)
       feedback error "Function aws_info does not handle ${1}"
-      ;;
+    ;;
   esac
 }
 
@@ -156,48 +156,48 @@ check_pid_lock () {
 # Beautifies the feedback to std_out
 feedback () {
   case ${1} in
-  title)
-    echo ''
-    echo '********************************************************************************'
-    echo '*                                                                              *'
-    echo "*   ${2}"
-    echo '*                                                                              *'
-    echo '********************************************************************************'
-    echo ''
+    title)
+      echo ''
+      echo '********************************************************************************'
+      echo '*                                                                              *'
+      echo "*   ${2}"
+      echo '*                                                                              *'
+      echo '********************************************************************************'
+      echo ''
     ;;
-  h1)
-    echo ''
-    echo '================================================================================'
-    echo "    ${2}"
-    echo '================================================================================'
-    echo ''
+    h1)
+      echo ''
+      echo '================================================================================'
+      echo "    ${2}"
+      echo '================================================================================'
+      echo ''
     ;;
-  h2)
-    echo ''
-    echo '================================================================================'
-    echo "--> ${2}"
-    echo '--------------------------------------------------------------------------------'
+    h2)
+      echo ''
+      echo '================================================================================'
+      echo "--> ${2}"
+      echo '--------------------------------------------------------------------------------'
     ;;
-  h3)
-    echo '--------------------------------------------------------------------------------'
-    echo "--> ${2}"
+    h3)
+      echo '--------------------------------------------------------------------------------'
+      echo "--> ${2}"
     ;;
-  body)
-    echo "--> ${2}"
+    body)
+      echo "--> ${2}"
     ;;
-  error)
-    echo ''
-    echo '********************************************************************************'
-    echo " *** Error: ${2}"
-    echo ''
+    error)
+      echo ''
+      echo '********************************************************************************'
+      echo " *** Error: ${2}"
+      echo ''
     ;;
-  *)
-    echo ''
-    echo "*** Error in the feedback function using the following parameters"
-    echo "*** P0: ${0}"
-    echo "*** P1: ${1}"
-    echo "*** P2: ${2}"
-    echo ''
+    *)
+      echo ''
+      echo "*** Error in the feedback function using the following parameters"
+      echo "*** P0: ${0}"
+      echo "*** P1: ${1}"
+      echo "*** P2: ${2}"
+      echo ''
     ;;
   esac
 }
@@ -207,51 +207,51 @@ pkgmgr () {
   # Check that the package manager is not already running
   check_pid_lock ${packmgr}
   case ${1} in
-  update)
-    feedback h3 'Get updates from package repositories'
-    case ${packmgr} in
-    apt)
-      apt-get --assume-yes update
-      local exit_code=${?}
-      ;;
-    yum)
-      yum --assumeyes update
-      local exit_code=${?}
-      ;;
-    esac
+    update)
+      feedback h3 'Get updates from package repositories'
+      case ${packmgr} in
+        apt)
+          apt-get --assume-yes update
+          local exit_code=${?}
+        ;;
+        yum)
+          yum --assumeyes update
+          local exit_code=${?}
+        ;;
+      esac
     ;;
-  upgrade)
-    feedback h3 'Upgrade installed packages'
-    case ${packmgr} in
-    apt)
-      apt-get --assume-yes upgrade
-      local exit_code=${?}
-      ;;
-    yum)
-      yum --assumeyes upgrade
-      local exit_code=${?}
-      ;;
-    esac
+    upgrade)
+      feedback h3 'Upgrade installed packages'
+      case ${packmgr} in
+        apt)
+          apt-get --assume-yes upgrade
+          local exit_code=${?}
+        ;;
+        yum)
+          yum --assumeyes upgrade
+          local exit_code=${?}
+        ;;
+      esac
     ;;
-  install)
-    # Check if any of the packages are already installed
-    check_packages absent "${2}"
-    feedback h3 "Install ${2}"
-    case ${packmgr} in
-    apt)
-      apt-get --assume-yes install ${2}
-      local exit_code=${?}
-      ;;
-    yum)
-      yum --assumeyes install ${2}
-      local exit_code=${?}
-      ;;
-    esac
-    # Check that each of the packages are now showing as installed in the package database to verify it completed properly
-    check_packages present "${2}"
+    install)
+      # Check if any of the packages are already installed
+      check_packages absent "${2}"
+      feedback h3 "Install ${2}"
+      case ${packmgr} in
+        apt)
+          apt-get --assume-yes install ${2}
+          local exit_code=${?}
+        ;;
+        yum)
+          yum --assumeyes install ${2}
+          local exit_code=${?}
+        ;;
+      esac
+      # Check that each of the packages are now showing as installed in the package database to verify it completed properly
+      check_packages present "${2}"
     ;;
-  *)
-    feedback error "The package manager function can not understand the command ${1}"
+    *)
+      feedback error "The package manager function can not understand the command ${1}"
     ;;
   esac
   if [ ${exit_code} -ne 0 ]
@@ -279,7 +279,7 @@ what_is_instance_meta () {
   fi
   if [ -z "${aws_region}" ]
   then
-    aws_region='us-east-1'
+    aws_region="${aws_region_default}"
     feedback error "AWS region not set, assuming ${aws_region}"
   fi
 }
@@ -951,6 +951,8 @@ fi
 #======================================
 # Declare the constants
 #--------------------------------------
+aws_region_default='us-east-1'
+
 # Get to know the OS so we can support AL2 and Ubuntu
 hostos_id=$(grep '^ID=' '/etc/os-release' | sed 's|"||g; s|^ID=||;')
 hostos_ver=$(grep '^VERSION_ID=' '/etc/os-release' | sed 's|"||g; s|^VERSION_ID=||;')

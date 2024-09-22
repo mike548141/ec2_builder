@@ -15,7 +15,7 @@
         "version": "1.0",
         "type": "complex",
         "Description.en": "cakeIT LAMP server for web hosting",
-        "init_script": "recipe/af91/web_server.sh",
+        "init_script": "recipes/af91/web_server.sh",
         "status.en": [ "active", "development" ]
       }
     }
