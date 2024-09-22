@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.3.2-20210314
+# Version:      0.3.3 2024-09-22T15:22
 # File:         launch.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -27,49 +27,82 @@
 #--------------------------------------
 aws_info () {
   case ${1} in
-  ec2_tag)
-    echo $(aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == '${2}'].Value" --output text --region ${aws_region})
-    ;;
-  ssm)
-    echo $(aws ssm get-parameter --name "${2}" --query 'Parameter.Value' --output text --region ${aws_region})
-    ;;
-  ssm_secure)
-    echo $(aws ssm get-parameter --name "${2}" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption)
-    ;;
-  *)
-    feedback error "Function aws_info does not handle ${1}"
-    ;;
+    ec2_tag)
+      echo $(aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == '${2}'].Value" --output text --region "${aws_region}")
+      ;;
+    ssm)
+      echo $(aws ssm get-parameter --name "${2}" --query 'Parameter.Value' --output text --region "${aws_region}")
+      ;;
+    ssm_secure)
+      echo $(aws ssm get-parameter --name "${2}" --query 'Parameter.Value' --output text --region "${aws_region}" --with-decryption)
+      ;;
+    *)
+      feedback error "Function aws_info does not handle ${1}"
+      ;;
   esac
 }
 
 check_packages () {
   # Handle a list of multiple packages by looping through them
-  for one_pkg in ${2}
+  for package in ${2}
   do
     # Lookup the package name if given a file name
-    if [ $(echo ${one_pkg} | grep -i '\.deb$') ]
+    if [ $(echo ${package} | grep -i '\.deb$') ]
     then
-      local one_clean_pkg=$(dpkg --info ${one_pkg} | grep ' Package: ' | sed 's|^ Package: ||;')
-    elif [ $(echo ${one_pkg} | grep -i '\.rpm$') ]
+      local pkg_name=$(dpkg --info ${package} | grep ' Package: ' | sed 's|^ Package: ||;')
+    elif [ $(echo ${package} | grep -i '\.rpm$') ]
     then
-      ## Add support for rpm packages
-      local one_clean_pkg='oops TBC'
+      ## I should add support for RPM packages
+      local pkg_name='oops TBC'
     else
-      local one_clean_pkg=${one_pkg}
+      local pkg_name=${package}
     fi
     
     # Check if the package is listed in the package manger database
-    if [ -z "$(apt list --installed ${one_clean_pkg} | grep -v '^Listing')" ]
+    local pkg_status=$(dpkg-query --showformat='${db:Status-Abbrev}' --show ${pkg_name})
+    if [ "${1}" == "present" ] && [ ${pkg_status} != 'ii' ]
     then
-      if [ "${1}" == "present" ]
-      then
-        feedback error "The package ${one_clean_pkg} has not installed properly"
-      fi
+      # Not installed i.e. not listed in the package manger database
+      feedback error "The package ${pkg_name} has not installed properly (${pkg_status})"
+    elif [ "${1}" == "absent" ] && [ ${pkg_status} == 'ii' ]
+    then
+      feedback error "The package ${pkg_name} is already installed (${pkg_status})"
+    fi
+  done
+}
+
+# Checks if the app is running, and waits for it to exit cleanly
+check_pid_lock () {
+  local sleep_timer=0
+  local sleep_max_timer=90
+  # Input error check for the function variables
+  if [[ ${2} =~ [^0-9] ]]
+  then
+    feedback error "check_pid_lock Invalid timer specified, using default of ${sleep_max_timer}"
+  elif [[ -n ${2} && ${2} -ge 0 && ${2} -le 3600 ]]
+  then
+    sleep_max_timer=${2}
+  elif [[ -n ${2} ]]
+  then
+    feedback error "check_pid_lock Timer outside of 0-3600 range, using default of ${sleep_max_timer}"
+  fi
+  # Watches to see the process (pid) has terminated
+  while [ -f "/var/run/${1}.pid" ]
+  do
+    if [[ ${sleep_timer} -ge ${sleep_max_timer} ]]
+    then
+      feedback error "Giving up waiting for ${1} to exit after ${sleep_timer} of ${sleep_max_timer} seconds"
+      break
+    elif [ $(ps -ef | grep -v 'grep' | grep "${1}" | wc -l) -ge 1 ]
+    then
+      feedback body "function timer: Waiting for ${1} to exit"
+      sleep 1
+      sleep_timer=$(( ${sleep_timer} + 1 ))
     else
-      if [ "${1}" == "absent" ]
-      then
-        feedback error "The package ${one_clean_pkg} is already installed"
-      fi
+      ## I should safety check this, make sure I'm not deleting the pid file with the process still running
+      feedback error "Deleting the PID file for ${1} because the process is not running"
+      rm --force "/var/run/${1}.pid"
+      break
     fi
   done
 }
@@ -125,6 +158,8 @@ feedback () {
 
 # Install an application package
 pkgmgr () {
+  # Check that the package manager is not already running
+  check_pid_lock ${packmgr}
   case ${1} in
   update)
     feedback h3 'Get updates from package repositories'
@@ -179,6 +214,8 @@ pkgmgr () {
   else
     feedback body "Thumbs up, ${packmgr} exit code ${exit_code}"
   fi
+  # Wait for the package manager to terminate
+  check_pid_lock ${packmgr}
 }
 
 what_is_instance_meta () {
@@ -249,8 +286,8 @@ ec2_builder_repo=$(aws_info ec2_tag 'ec2_builder_repo')
 recipe=$(aws_info ec2_tag 'recipe')
 
 feedback h1 'Clone the build scripts'
-mkdir --parents ~/builder/
-git clone ${ec2_builder_repo} ~/builder/
+mkdir --parents '~/builder/'
+git clone ${ec2_builder_repo} '~/builder/'
 exit_code=${?}
 if [ ${exit_code} -ne 0 ]
 then
