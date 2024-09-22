@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.71-20210314
+# Version:      0.7.71 2024-09-22T15:22
 # File:         web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -71,6 +71,232 @@
 #======================================
 # Declare the libraries and functions
 #--------------------------------------
+aws_info () {
+  case ${1} in
+    ec2_tag)
+      echo $(aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == '${2}'].Value" --output text --region "${aws_region}")
+      ;;
+    ssm)
+      echo $(aws ssm get-parameter --name "${2}" --query 'Parameter.Value' --output text --region "${aws_region}")
+      ;;
+    ssm_secure)
+      echo $(aws ssm get-parameter --name "${2}" --query 'Parameter.Value' --output text --region "${aws_region}" --with-decryption)
+      ;;
+    *)
+      feedback error "Function aws_info does not handle ${1}"
+      ;;
+  esac
+}
+
+check_packages () {
+  # Handle a list of multiple packages by looping through them
+  for package in ${2}
+  do
+    # Lookup the package name if given a file name
+    if [ $(echo ${package} | grep -i '\.deb$') ]
+    then
+      local pkg_name=$(dpkg --info ${package} | grep ' Package: ' | sed 's|^ Package: ||;')
+    elif [ $(echo ${package} | grep -i '\.rpm$') ]
+    then
+      ## I should add support for RPM packages
+      local pkg_name='oops TBC'
+    else
+      local pkg_name=${package}
+    fi
+    
+    # Check if the package is listed in the package manger database
+    local pkg_status=$(dpkg-query --showformat='${db:Status-Abbrev}' --show ${pkg_name})
+    if [ "${1}" == "present" ] && [ ${pkg_status} != 'ii' ]
+    then
+      # Not installed i.e. not listed in the package manger database
+      feedback error "The package ${pkg_name} has not installed properly (${pkg_status})"
+    elif [ "${1}" == "absent" ] && [ ${pkg_status} == 'ii' ]
+    then
+      feedback error "The package ${pkg_name} is already installed (${pkg_status})"
+    fi
+  done
+}
+
+# Checks if the app is running, and waits for it to exit cleanly
+check_pid_lock () {
+  local sleep_timer=0
+  local sleep_max_timer=90
+  # Input error check for the function variables
+  if [[ ${2} =~ [^0-9] ]]
+  then
+    feedback error "check_pid_lock Invalid timer specified, using default of ${sleep_max_timer}"
+  elif [[ -n ${2} && ${2} -ge 0 && ${2} -le 3600 ]]
+  then
+    sleep_max_timer=${2}
+  elif [[ -n ${2} ]]
+  then
+    feedback error "check_pid_lock Timer outside of 0-3600 range, using default of ${sleep_max_timer}"
+  fi
+  # Watches to see the process (pid) has terminated
+  while [ -f "/var/run/${1}.pid" ]
+  do
+    if [[ ${sleep_timer} -ge ${sleep_max_timer} ]]
+    then
+      feedback error "Giving up waiting for ${1} to exit after ${sleep_timer} of ${sleep_max_timer} seconds"
+      break
+    elif [ $(ps -ef | grep -v 'grep' | grep "${1}" | wc -l) -ge 1 ]
+    then
+      feedback body "function timer: Waiting for ${1} to exit"
+      sleep 1
+      sleep_timer=$(( ${sleep_timer} + 1 ))
+    else
+      ## I should safety check this, make sure I'm not deleting the pid file with the process still running
+      feedback error "Deleting the PID file for ${1} because the process is not running"
+      rm --force "/var/run/${1}.pid"
+      break
+    fi
+  done
+}
+
+# Beautifies the feedback to std_out
+feedback () {
+  case ${1} in
+  title)
+    echo ''
+    echo '********************************************************************************'
+    echo '*                                                                              *'
+    echo "*   ${2}"
+    echo '*                                                                              *'
+    echo '********************************************************************************'
+    echo ''
+    ;;
+  h1)
+    echo ''
+    echo '================================================================================'
+    echo "    ${2}"
+    echo '================================================================================'
+    echo ''
+    ;;
+  h2)
+    echo ''
+    echo '================================================================================'
+    echo "--> ${2}"
+    echo '--------------------------------------------------------------------------------'
+    ;;
+  h3)
+    echo '--------------------------------------------------------------------------------'
+    echo "--> ${2}"
+    ;;
+  body)
+    echo "--> ${2}"
+    ;;
+  error)
+    echo ''
+    echo '********************************************************************************'
+    echo " *** Error: ${2}"
+    echo ''
+    ;;
+  *)
+    echo ''
+    echo "*** Error in the feedback function using the following parameters"
+    echo "*** P0: ${0}"
+    echo "*** P1: ${1}"
+    echo "*** P2: ${2}"
+    echo ''
+    ;;
+  esac
+}
+
+# Install an application package
+pkgmgr () {
+  # Check that the package manager is not already running
+  check_pid_lock ${packmgr}
+  case ${1} in
+  update)
+    feedback h3 'Get updates from package repositories'
+    case ${packmgr} in
+    apt)
+      apt-get --assume-yes update
+      local exit_code=${?}
+      ;;
+    yum)
+      yum --assumeyes update
+      local exit_code=${?}
+      ;;
+    esac
+    ;;
+  upgrade)
+    feedback h3 'Upgrade installed packages'
+    case ${packmgr} in
+    apt)
+      apt-get --assume-yes upgrade
+      local exit_code=${?}
+      ;;
+    yum)
+      yum --assumeyes upgrade
+      local exit_code=${?}
+      ;;
+    esac
+    ;;
+  install)
+    # Check if any of the packages are already installed
+    check_packages absent "${2}"
+    feedback h3 "Install ${2}"
+    case ${packmgr} in
+    apt)
+      apt-get --assume-yes install ${2}
+      local exit_code=${?}
+      ;;
+    yum)
+      yum --assumeyes install ${2}
+      local exit_code=${?}
+      ;;
+    esac
+    # Check that each of the packages are now showing as installed in the package database to verify it completed properly
+    check_packages present "${2}"
+    ;;
+  *)
+    feedback error "The package manager function can not understand the command ${1}"
+    ;;
+  esac
+  if [ ${exit_code} -ne 0 ]
+  then
+    feedback error "${packmgr} exit code ${exit_code}"
+  else
+    feedback body "Thumbs up, ${packmgr} exit code ${exit_code}"
+  fi
+  # Wait for the package manager to terminate
+  check_pid_lock ${packmgr}
+}
+
+what_is_instance_meta () {
+  # AWS region and EC2 instance ID so we can use awscli
+  if [ -f '/usr/bin/ec2metadata' ]
+  then
+    aws_region=$(ec2metadata --availability-zone | cut -c 1-9)
+    instance_id=$(ec2metadata --instance-id)
+  elif [ -f '/usr/bin/ec2-metadata' ]
+  then
+    aws_region=$(ec2-metadata --availability-zone | cut -c 12-20)
+    instance_id=$(ec2-metadata --instance-id | cut -c 14-)
+  else
+    feedback error "Can't find ec2metadata or ec2-metadata"
+  fi
+  if [ -z "${aws_region}" ]
+  then
+    aws_region='us-east-1'
+    feedback error "AWS region not set, assuming ${aws_region}"
+  fi
+}
+
+what_is_package_manager () {
+  # Which package manger do we have to work with
+  if [ -f '/usr/bin/apt' ]
+  then
+    packmgr='apt'
+  elif [ -f '/usr/bin/yum' ]
+  then
+    packmgr='yum'
+  else
+    feedback error 'Package manager not found'
+  fi
+}
+
 app_apache2 () {
   # Install the web server
   feedback h1 'Install the web server'
@@ -522,91 +748,6 @@ associate_eip () {
   fi
 }
 
-aws_info () {
-  case ${1} in
-  ec2_tag)
-    echo $(aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == '${2}'].Value" --output text --region ${aws_region})
-    ;;
-  ssm)
-    echo $(aws ssm get-parameter --name "${2}" --query 'Parameter.Value' --output text --region ${aws_region})
-    ;;
-  ssm_secure)
-    echo $(aws ssm get-parameter --name "${2}" --query 'Parameter.Value' --output text --region ${aws_region} --with-decryption)
-    ;;
-  *)
-    feedback error "Function aws_info does not handle ${1}"
-    ;;
-  esac
-}
-
-check_packages () {
-  # Handle a list of multiple packages by looping through them
-  for one_pkg in ${2}
-  do
-    # Lookup the package name if given a file name
-    if [ $(echo ${one_pkg} | grep -i '\.deb$') ]
-    then
-      local one_clean_pkg=$(dpkg --info ${one_pkg} | grep ' Package: ' | sed 's|^ Package: ||;')
-    elif [ $(echo ${one_pkg} | grep -i '\.rpm$') ]
-    then
-      ## Add support for rpm packages
-      local one_clean_pkg='oops TBC'
-    else
-      local one_clean_pkg=${one_pkg}
-    fi
-    
-    # Check if the package is listed in the package manger database
-    if [ -z "$(apt list --installed ${one_clean_pkg} | grep -v '^Listing')" ]
-    then
-      if [ "${1}" == "present" ]
-      then
-        feedback error "The package ${one_clean_pkg} has not installed properly"
-      fi
-    else
-      if [ "${1}" == "absent" ]
-      then
-        feedback error "The package ${one_clean_pkg} is already installed"
-      fi
-    fi
-  done
-}
-
-# Checks if the app is running, and waits for it to exit cleanly
-check_pid_lock () {
-  local sleep_timer=0
-  local sleep_max_timer=90
-  # Input error check for the function variables
-  if [[ ${2} =~ [^0-9] ]]
-  then
-    feedback error "check_pid_lock Invalid timer specified, using default of ${sleep_max_timer}"
-  elif [[ -n ${2} && ${2} -ge 0 && ${2} -le 3600 ]]
-  then
-    sleep_max_timer=${2}
-  elif [[ -n ${2} ]]
-  then
-    feedback error "check_pid_lock Timer outside of 0-3600 range, using default of ${sleep_max_timer}"
-  fi
-  # Watches to see the process (pid) has terminated
-  while [ -f "/var/run/${1}.pid" ]
-  do
-    if [[ ${sleep_timer} -ge ${sleep_max_timer} ]]
-    then
-      feedback error "Giving up waiting for ${1} to exit after ${sleep_timer} of ${sleep_max_timer} seconds"
-      break
-    elif [ $(ps -ef | grep -v 'grep' | grep "${1}" | wc -l) -ge 1 ]
-    then
-      feedback body "function timer: Waiting for ${1} to exit"
-      sleep 1
-      sleep_timer=$(( ${sleep_timer} + 1 ))
-    else
-      ## I should safety check this, make sure I'm not deleting the pid file with the process still running
-      feedback error "Deleting the PID file for ${1} because the process is not running"
-      rm --force "/var/run/${1}.pid"
-      break
-    fi
-  done
-}
-
 configure_awscli () {
   # Root's config for AWS CLI tools held in ~/.aws, after this is set awscli uses the rights assigned to arn:aws:iam::954095588241:user/ec2.web2.cakeit.nz instead of the instance profile arn:aws:iam::954095588241:instance-profile/ec2-web.cakeit.nz and role arn:aws:iam::954095588241:role/ec2-web.cakeit.nz
   feedback h1 'Configure AWS CLI for the root user'
@@ -683,63 +824,12 @@ disable_service () {
   systemctl -l status ${1}
 }
 
-# Beautifies the feedback to std_out
-feedback () {
-  case ${1} in
-  title)
-    echo ''
-    echo '********************************************************************************'
-    echo '*                                                                              *'
-    echo "*   ${2}"
-    echo '*                                                                              *'
-    echo '********************************************************************************'
-    echo ''
-    ;;
-  h1)
-    echo ''
-    echo '================================================================================'
-    echo "    ${2}"
-    echo '================================================================================'
-    echo ''
-    ;;
-  h2)
-    echo ''
-    echo '================================================================================'
-    echo "--> ${2}"
-    echo '--------------------------------------------------------------------------------'
-    ;;
-  h3)
-    echo '--------------------------------------------------------------------------------'
-    echo "--> ${2}"
-    ;;
-  body)
-    echo "--> ${2}"
-    ;;
-  error)
-    echo ''
-    echo '********************************************************************************'
-    echo " *** Error: ${2}"
-    echo ''
-    ;;
-  *)
-    echo ''
-    echo "*** Error in the feedback function using the following parameters"
-    echo "*** P0: ${0}"
-    echo "*** P1: ${1}"
-    echo "*** P2: ${2}"
-    echo ''
-    ;;
-  esac
-}
-
 mount_efs_volume () {
   # Install AWS EFS helper and mount the EFS volume for vhost data
   feedback h1 'AWS EFS helper'
   case ${packmgr} in
   apt)
-    mkdir --parents '/opt/aws'
-    cd '/opt/aws'
-    git clone https://github.com/aws/efs-utils
+    git clone https://github.com/aws/efs-utils '/opt/aws/efs-utils/'
     cd '/opt/aws/efs-utils'
     ./build-deb.sh
     pkgmgr install ./build/amazon-efs-utils-*.deb
@@ -778,8 +868,7 @@ mount_s3_bucket () {
     ;;
   esac
   feedback h3 'Configure FUSE'
-  cp '/etc/fuse.conf' '/etc/fuse.conf.bak'
-  sed -i 's|^# user_allow_other$|user_allow_other|' '/etc/fuse.conf'
+  sed -i.bak 's|^# user_allow_other$|user_allow_other|' '/etc/fuse.conf'
   feedback h3 'Mount the S3 bucket for static web data'
   mkdir --parents ${s3_mount_point}
   if mountpoint -q ${s3_mount_point}
@@ -808,68 +897,6 @@ pam_google_mfa () {
   ## Add the configuration to use this with SSH
 }
 
-# Install an application package
-pkgmgr () {
-  # Check that the package manager is not already running
-  check_pid_lock ${packmgr}
-  case ${1} in
-  update)
-    feedback h3 'Get updates from package repositories'
-    case ${packmgr} in
-    apt)
-      apt-get --assume-yes update
-      local exit_code=${?}
-      ;;
-    yum)
-      yum --assumeyes update
-      local exit_code=${?}
-      ;;
-    esac
-    ;;
-  upgrade)
-    feedback h3 'Upgrade installed packages'
-    case ${packmgr} in
-    apt)
-      apt-get --assume-yes upgrade
-      local exit_code=${?}
-      ;;
-    yum)
-      yum --assumeyes upgrade
-      local exit_code=${?}
-      ;;
-    esac
-    ;;
-  install)
-    # Check if any of the packages are already installed
-    check_packages absent "${2}"
-    feedback h3 "Install ${2}"
-    case ${packmgr} in
-    apt)
-      apt-get --assume-yes install ${2}
-      local exit_code=${?}
-      ;;
-    yum)
-      yum --assumeyes install ${2}
-      local exit_code=${?}
-      ;;
-    esac
-    # Check that each of the packages are now showing as installed in the package database to verify it completed properly
-    check_packages present "${2}"
-    ;;
-  *)
-    feedback error "The package manager function can not understand the command ${1}"
-    ;;
-  esac
-  if [ ${exit_code} -ne 0 ]
-  then
-    feedback error "${packmgr} exit code ${exit_code}"
-  else
-    feedback body "Thumbs up, ${packmgr} exit code ${exit_code}"
-  fi
-  # Wait for the package manager to terminate
-  check_pid_lock ${packmgr}
-}
-
 # Wrap the amazon_linux_extras script with additional steps
 manage_ale () {
   case ${hostos_id} in
@@ -883,39 +910,6 @@ manage_ale () {
 restart_service () {
   systemctl restart ${1}
   systemctl -l status ${1}
-}
-
-what_is_instance_meta () {
-  # AWS region and EC2 instance ID so we can use awscli
-  if [ -f '/usr/bin/ec2metadata' ]
-  then
-    aws_region=$(ec2metadata --availability-zone | cut -c 1-9)
-    instance_id=$(ec2metadata --instance-id)
-  elif [ -f '/usr/bin/ec2-metadata' ]
-  then
-    aws_region=$(ec2-metadata --availability-zone | cut -c 12-20)
-    instance_id=$(ec2-metadata --instance-id | cut -c 14-)
-  else
-    feedback error "Can't find ec2metadata or ec2-metadata"
-  fi
-  if [ -z "${aws_region}" ]
-  then
-    aws_region='us-east-1'
-    feedback error "AWS region not set, assuming ${aws_region}"
-  fi
-}
-
-what_is_package_manager () {
-  # Which package manger do we have to work with
-  if [ -f '/usr/bin/apt' ]
-  then
-    packmgr='apt'
-  elif [ -f '/usr/bin/yum' ]
-  then
-    packmgr='yum'
-  else
-    feedback error 'Package manager not found'
-  fi
 }
 
 # Find what Public IP addresses are assigned to the instance
@@ -1010,7 +1004,8 @@ useradd --shell '/bin/bash' --create-home -c 'Mike Clements' --groups ssh,sudo '
 feedback h3 'Add SSH key'
 mkdir --parents '/home/mike/.ssh'
 chmod 0700 '/home/mike/.ssh'
-wget --tries=2 -O '/home/mike/.ssh/authorized_keys' 'https://cakeit.nz/identity/mike.clements/mike-ssh.pub'
+#wget --tries=2 -O '/home/mike/.ssh/authorized_keys' 'https://cakeit.nz/identity/mike.clements/mike-ssh.pub'
+echo $(aws_info ssm "${common_parameters}/ssh/mike") > '/home/mike/.ssh/authorized_keys'
 chmod 0600 '/home/mike/.ssh/authorized_keys'
 chown -R mike:mike '/home/mike/.ssh'
 
@@ -1121,3 +1116,12 @@ grep -i 'warn' '/var/log/cloud-init-output.log' | sort | uniq >> ~/for_review.lo
 # Thats all I wrote
 feedback title "Build script finished - https://${instance_id}.${hosting_domain}/wiki/"
 exit 0
+
+
+#php 8
+#EFS and S3 files missing
+#speedtest
+#ssh mike user
+#cloudflare error
+#trade out pkgmgr and apt for apt-get etc to stop WARNING: apt does not have a stable CLI interface. Use with caution in scripts.
+#EC2 recommends setting IMDSv2 to required
