@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.1.0 2024-09-22T22:15
+# Version:      0.1.1 2024-09-23T01:57
 # File:         aws_info.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -31,7 +31,7 @@ aws_info () {
       echo $(aws ec2 describe-tags --query "Tags[?ResourceType == 'instance' && ResourceId == '${instance_id}' && Key == '${2}'].Value" --output text --region "${aws_region}")
     ;;
     ec2_tags)
-      echo $(aws ec2 describe-tags --output table --region "${aws_region}")
+      echo $(aws ec2 describe-tags --output json --region "${aws_region}")
     ;;
     ssm)
       echo $(aws ssm get-parameter --name "${2}" --query 'Parameter.Value' --output text --region "${aws_region}")

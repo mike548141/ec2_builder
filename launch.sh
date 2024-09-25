@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.4.1 2024-09-23T01:21
+# Version:      0.4.2 2024-09-23T01:59
 # File:         launch.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -80,9 +80,6 @@ for ingredient in ~/builder/ingredients/*.sh
 do
   source ${ingredient}
 done
-
-feedback h1 'AWS EC2 instance tags'
-aws_info ec2_tags
 
 feedback h1 "Start the ${recipe} recipe"
 next_script=$(jq --raw-output ".inventory.recipes.${recipe}.init_script" ~/builder/inventory.json)

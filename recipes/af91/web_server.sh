@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Author:       Mike Clements, Competitive Edge
-# Version:      0.7.71 2024-09-22T15:22
+# Version:      0.8.0 2024-09-23T01:59
 # File:         web_server.sh
 # License:      GNU GPL v3
 # Language:     bash
@@ -90,6 +90,9 @@ feedback h1 'Update the software stack'
 pkgmgr update
 pkgmgr upgrade
 systemctl daemon-reload
+
+feedback h1 'AWS EC2 instance tags'
+aws_info ec2_tags
 
 case ${packmgr} in
 apt)
